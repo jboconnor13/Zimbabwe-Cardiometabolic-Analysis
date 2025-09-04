@@ -469,13 +469,13 @@ Ent_Blast_data$Komagataella[which(Ent_Blast_data$SampleID %in% Kom_IDs)] <- "Yes
 Ent_Blast_data$Strigeidida[which(Ent_Blast_data$SampleID %in% Str_IDs)] <- "Yes"
 
 
-Ent_Blast_data_add <- Ent_Blast_data[,c("SampleID","Blastocystis","Entamoeba")]
+Ent_Blast_data_add <- Ent_Blast_data[,c("SampleID","Blastocystis","Entamoeba","Komagataella","Strigeidida")]
 
 base_with_18S <- inner_join(base,Ent_Blast_data_add, by="SampleID")
 
 ```
 
-####Metdata Add Ons
+####Metadata Add Ons
 
 ```{r}
 
@@ -490,16 +490,58 @@ base <- left_join(base,Ent_Blast_data_add, by="SampleID")
 ###Necessary Objects are Saved
 ```{r}
 
-# Metadata files
+# Metadata Objects
   #base: all processed metadata
   #long: all processed metadata from samples collected at both timepoints
+  metadata_objects <- list(base=base, 
+                           long=long)
+  saveRDS(metadata_objects, file = "../../Data/R_Data/metadata_objects.RDS")
 
-metadata_objects <- c("base", "long")
-saveRDS(metadata_objects, file = "important_objects.RData")
+#16S Objects
+  #base: all processed metadata
+  #base_with_16S: metadata file with 16S results
+  #fecal.gen.names: original genus names
+  #RA_plot_16S: data frame with relative abundances for barplot
+  #fecal.tax.plot.data: 16S phyloseq object 
+  mic_16S_objects <- list(base=base,
+                          base_with_16S=base_with_16S, 
+                          fecal.gen.names=fecal.gen.names, 
+                          RA_plot_16S=RA_plot_16S,
+                          fecal.tax.plot.data=fecal.tax.plot.data)
+  saveRDS(mic_16S_objects, file = "../../Data/R_Data/mic_16S_objects.RDS")
+  
+#Shotgun Taxonomic Objects
+  #base: all processed metadata
+  #base_with_sg_tax: metadata file with sg taxanomic results
+  #fecal.species.names: original shotgun species names
+  #RA_plot_sg_tax: data frame with relative abundances for barplot
+  mic_sg_tax_objects <- list(base=base,
+                            base_with_sg_tax=base_with_sg_tax, 
+                            fecal.species.names=fecal.species.names, 
+                            RA_plot_sg_tax=RA_plot_sg_tax)
+  saveRDS(mic_sg_tax_objects, file = "../../Data/R_Data/mic_sg_tax_objects.RDS")
 
-# A list of all objects in your current workspace
-all_objects <- ls()
-rm(list = all_objects)
+#Shotgun Functional Objects
+  #base: all processed metadata
+  #base_with_sg_fun: metadata file with sg functional KOs in TPM 
+  mic_sg_fun_objects <- list(base=base,
+                              base_with_sg_fun=base_with_sg_fun)
+  saveRDS(mic_sg_fun_objects, file = "../../Data/R_Data/mic_sg_fun_objects.RDS")
+
+#18S objects
+  #base: all processed metadata
+  #Euk_18S_mdf: 18S mdf data frmae
+  #base_with_18S: metadata with with 18S added
+  #Zim_all_sg_genera_pre: Unfiltered shotgun taxonomic data
+  #fecal.tax.plot.data: 16S phyloseq object 
+  #base_with_sg_fun: metadata file with sg functional KOs in TPM 
+  euk_18S_objects <- list(base=base,
+                          Euk_18S_mdf=Euk_18S_mdf,
+                          base_with_18S=base_with_18S,
+                          Zim_all_sg_genera_pre=Zim_all_sg_genera_pre,
+                          fecal.tax.plot.data=fecal.tax.plot.data,
+                          base_with_sg_fun=base_with_sg_fun)
+  saveRDS(euk_18S_objects, file = "../../Data/R_Data/euk_18S_objects.RDS")
 
 ```
 
