@@ -1,0 +1,505 @@
+---
+title: "Data Import"
+author: "J. O'Connor"
+date: "2025-09-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document that pulls in all of the data and saves it in the environment
+
+
+### Data is pulled in 
+```{r import}
+#Metdata files 
+#All data
+base <- read_delim("../../Data/Metadata/zim2_baseline.txt", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+#data with longitdinal samples
+long <- read_delim("../../Data//Metadata/zim2_longitudinal.txt", 
+    delim = "\t", escape_double = FALSE, 
+    trim_ws = TRUE)
+
+#Microbiome Data
+#qiime2R is used to generate aphyloseq object from the exported files
+fecal.tax.plot.data <- qiime2R::qza_to_phyloseq(features="../../Data/16S/tax_rarefied_Zim2.qza",
+                                      taxonomy="../../Data/16S/classification.qza",
+                                      metadata="../../Data/Metadata/FullQIIMEMeta.tsv",
+                                      tree="../../Data/16S/tree_Zim.qza")
+
+  
+
+
+###Diveristy analysis imported as well 
+
+#We also pull the alpha diversity measures
+fecal.shannon <- read.table('../../Data/16S/Diversity_Results/Shannon/alpha-diversity.tsv', header=TRUE, sep='\t', row.names=1)
+colnames(fecal.shannon) <- "Shannon_Diversity"
+
+fecal.faith <- read.table('../../Data/16S/Diversity_Results/Faith/alpha-diversity.tsv', header=TRUE, sep='\t', row.names=1)
+colnames(fecal.faith) <- "Faith_Diversity"
+
+fecal.shannon_add <- fecal.shannon
+fecal.shannon_add$SampleID <- rownames(fecal.shannon)
+
+fecal.faith_add <- fecal.faith
+fecal.faith_add$SampleID <- rownames(fecal.faith)
+
+###We also pull the biplot results
+fecal.wu.biplot <-read_qza("../../Data/16S/Diversity_Results/WU_biplot.qza")
+
+#We also pull the matrix
+fecal.wu.matrix <-read.table('../../Data/16S/Diversity_Results/WU_Matrix/distance-matrix.tsv', header=TRUE, sep='\t', row.names=1)
+
+#Shotgun Data
+
+#Shotgun Taxonomies
+Zim1 <- read.table("../../Data/Shotgun_Taxa/Zim1taxonomy.tsv", header = TRUE, sep = "\t")
+Zim4 <- read.table("../../Data/Shotgun_Taxa/Zim4taxonomy.tsv", header = TRUE, sep = "\t")
+
+#SHotgun Functional Data
+#HUMAnn outputs with KOs are pulled again from Zim1 and Zim4
+Zim1_KO <- read.table("../../Data/Shotgun_KOs/rd1_all_genefamilies_ko.tsv", header = TRUE, sep = "\t") 
+Zim4_KO <- read.table("../../Data/Shotgun_KOs/rd2_all_genefamilies_ko.tsv", header = TRUE, sep = "\t")
+
+#18S Data is loaded in 
+
+
+#qiime2R is used to generate aphyloseq object from the exported files
+Euk.18S.data_SEQ033 <- qiime2R::qza_to_phyloseq(features="../../Data/18S/SEQ033/table.qza",
+                                      taxonomy="../../Data/18S/SEQ033/taxonomy.qza",
+                              metadata="../../Data/18S/SEQ033/metadata_Rinput.tsv")
+
+#qiime2R is used to generate aphyloseq object from the exported files
+Euk.18S.data_SEQ081 <- qiime2R::qza_to_phyloseq(features="../../Data/18S/SEQ081/table.qza",
+                                      taxonomy="../../Data/18S/SEQ081/taxonomy.qza",
+                              metadata="../../Data/18S/SEQ081/S81_barcodes.txt")
+
+
+
+```
+
+###Data Sets are Processed 
+
+####Metadata Fields
+```{r}
+
+#Additional data wrangling similar to Zim1 Markdown
+
+# Cleaner columns for visualizations
+long$Location[long$Arm_Short == "MA"] <- "Urban"
+long$Location[long$Arm_Short == "MT"] <- "Rural"
+long$Cohort[long$Cohort_Short == "A"] <- "Naïve"
+long$Cohort[long$Cohort_Short == "B"] <- "Exp"
+long$Cohort[long$Cohort_Short == "C"] <- "HC"
+long$Week[long$Visit == 2] <- 0
+long$Week[long$Visit == 3] <- 24
+long$Location <- as.factor(long$Location)
+long$Cohort <- as.factor(long$Cohort)
+long$Cohort <- ordered(long$Cohort, levels = c("Naïve", "Exp", "HC"))
+long$Week <- as.factor(long$Week)
+long$Treatment[long$Cohort_Short=="A" & long$Visit==2] <- "No"
+long$Treatment[long$Cohort_Short=="A" & long$Visit==3] <- "Yes"
+long$Treatment[long$Cohort_Short=="B"] <- "Yes"
+long$Treatment[long$Cohort_Short=="C"] <- "No"
+long$Treatment <- factor(long$Treatment, levels=c("No","Yes"), ordered = TRUE)
+long$HIV_Status <- factor(long$HIV_Status, levels=c("Negative","Positive"), ordered = TRUE)
+long$Gender <- factor(long$Gender, levels=c("Female","Male"), ordered = TRUE) 
+long$Location <- factor(long$Location, levels=c("Rural","Urban"), ordered = TRUE)
+long$HealthyHDL[long$`HDL_mg-dL`>40] <- "Healthy"
+long$HealthyHDL[long$`HDL_mg-dL`<=40] <- "Low"
+long$HealthyLDL[long$`LDL_mg-dL`>=160] <- "High"
+long$HealthyLDL[long$`LDL_mg-dL`<160] <- "Healthy"
+long$HealthyTrig[long$`Trig_mg-dL`>=200] <- "High"
+long$HealthyTrig[long$`Trig_mg-dL`<200] <- "Healthy"
+long$HealthyGlucose[long$`Glucose_mg-dL`>=125] <- "High"
+long$HealthyGlucose[long$`Glucose_mg-dL`<125 & long$`Glucose_mg-dL`>=70] <- "Healthy"
+long$HealthyGlucose[long$`Glucose_mg-dL`<70] <- "Low"
+long$HDL <- as.numeric(long$`HDL_mg-dL`)
+long$LDL <- as.numeric(long$`LDL_mg-dL`)
+long$Glucose <- as.numeric(long$`Glucose_mg-dL`)
+long$Trig <- as.numeric(long$`Trig_mg-dL`)
+
+
+
+# Cleaner columns for visualizations
+base$Location[base$Arm_Short == "MA"] <- "Urban"
+base$Location[base$Arm_Short == "MT"] <- "Rural"
+base$Cohort[base$Cohort_Short == "A"] <- "Naïve"
+base$Cohort[base$Cohort_Short == "B"] <- "Exp"
+base$Cohort[base$Cohort_Short == "C"] <- "HC"
+base$Week[base$Visit == 2] <- 0
+base$Week[base$Visit == 3] <- 24
+base$Location <- as.factor(base$Location)
+base$Cohort <- as.factor(base$Cohort)
+base$Cohort <- ordered(base$Cohort, levels = c("Naïve", "Exp", "HC"))
+base$Week <- as.factor(base$Week)
+base$Treatment[base$Cohort_Short=="A" & base$Visit==2] <- "No"
+base$Treatment[base$Cohort_Short=="A" & base$Visit==3] <- "Yes"
+base$Treatment[base$Cohort_Short=="B"] <- "Yes"
+base$Treatment[base$Cohort_Short=="C"] <- "No"
+base$Treatment <- factor(base$Treatment, levels=c("No","Yes"), ordered = TRUE)
+base$HIV_Status <- factor(base$HIV_Status, levels=c("Negative","Positive"), ordered = TRUE)
+base$Gender <- factor(base$Gender, levels=c("Female","Male"), ordered = TRUE) 
+base$Location <- factor(base$Location, levels=c("Rural","Urban"), ordered = TRUE)
+base$HealthyHDL[base$`HDL_mg-dL`>40] <- "Healthy"
+base$HealthyHDL[base$`HDL_mg-dL`<=40] <- "Low"
+base$HealthyLDL[base$`LDL_mg-dL`>=160] <- "High"
+base$HealthyLDL[base$`LDL_mg-dL`<160] <- "Healthy"
+base$HealthyTrig[base$`Trig_mg-dL`>=200] <- "High"
+base$HealthyTrig[base$`Trig_mg-dL`<200] <- "Healthy"
+base$HealthyGlucose[base$`Glucose_mg-dL`>=125] <- "High"
+base$HealthyGlucose[base$`Glucose_mg-dL`<125 & base$`Glucose_mg-dL`>=70] <- "Healthy"
+base$HealthyGlucose[base$`Glucose_mg-dL`<70] <- "Low"
+base$HDL <- as.numeric(base$`HDL_mg-dL`)
+base$LDL <- as.numeric(base$`LDL_mg-dL`)
+base$Glucose <- as.numeric(base$`Glucose_mg-dL`)
+base$Trig <- as.numeric(base$`Trig_mg-dL`)
+
+
+```
+
+####16S Microbiome data
+```{r}
+
+
+#Below 16S microbiome data is processed and added to the metadata files
+
+#Preps in counts 
+fecal.gen.count <- prep_mdf(fecal.tax.plot.data, subgroup_level="Genus", as_relative_abundance = FALSE)
+
+#SUm up the counts by Genus
+fecal.gen.count.sum <- fecal.gen.count %>%
+                        group_by(Sample, Genus) %>%
+                        summarise(Counts=sum(Abundance))
+
+#Pivot this wider 
+fecal.gen.wide <- pivot_wider(fecal.gen.count.sum, id_cols="Sample", names_from="Genus", values_from="Counts")
+
+#Replace NA values with zeros
+for (c1 in 2:ncol(fecal.gen.wide)) {
+  for (r1 in 1:nrow(fecal.gen.wide)) {
+    if (is.na(fecal.gen.wide[r1,c1])) {
+      fecal.gen.wide[r1,c1] <- 0
+    }
+  }
+}
+
+#We need pull the count data
+fecal.gen.clr_pre <- fecal.gen.wide
+
+#We then clr transform it so we first need to add 1
+fecal.gen.clr_pre[,2:ncol(fecal.gen.clr_pre)] <- fecal.gen.clr_pre[,2:ncol(fecal.gen.clr_pre)]+1
+
+#Now we CLR Transform
+fecal.gen.clr_pre[,2:ncol(fecal.gen.clr_pre)] <- clr(fecal.gen.clr_pre[,2:ncol(fecal.gen.clr_pre)])
+
+#Now after the transform we take out the bacterial genera
+#We first pull those names
+bac_genera <- unique(fecal.gen.count$Genus[which(!is.na(fecal.gen.count$Genus) & fecal.gen.count$Kingdom=="d__Bacteria" & fecal.gen.count$Genus!="uncultured")])
+
+#Now we include the genuses in th taxa name
+fecal.gen.clr <- fecal.gen.clr_pre[,c("Sample",bac_genera)]
+
+#fecal.gen.clr <- fecal.gen.clr_pre
+
+#Now we pull the Genus names
+fecal.gen.names <- colnames(fecal.gen.clr)[2:ncol(fecal.gen.clr)]
+#They are renamed for simplicity
+colnames(fecal.gen.clr)[2:ncol(fecal.gen.clr)] <- paste0("g_16S_",2:ncol(fecal.gen.clr))
+
+fecal.gen_ind <- paste0("g_16S_",2:ncol(fecal.gen.clr))
+
+
+fecal.gen.clr <- as.data.frame(fecal.gen.clr)
+colnames(fecal.gen.clr)[1] <- c("SampleID")
+
+#We now add them to the base and long files 
+base_with_16S <- left_join(base, fecal.gen.clr, by="SampleID")
+
+
+#Now we do relative abundances for the abundance plot
+#Below we determine the 50 taxa with greatest median relativeabundance
+
+#To do that first we need to again use the prep_mdf function but d as-relative abudance
+#Preps in counts 
+fecal.gen.count_RA <- prep_mdf(fecal.tax.plot.data, subgroup_level="Genus", as_relative_abundance = TRUE)
+
+fecal.gen.count_RA_for_plot_pre <- fecal.gen.count_RA
+
+#We rename the sampleID to add to the base metadata file
+colnames(fecal.gen.count_RA_for_plot_pre)[2] <- "SampleID"
+#We now use inner join to add it
+RA_plot_16S <- inner_join(fecal.gen.count_RA_for_plot_pre,base, by="SampleID")
+
+```
+
+
+####Shotgun Taxonomic Data
+```{r}
+
+
+#Below Shotgun data is processed and added to the metadata files
+#Samples are pivoted to the longer format
+Zim1_sg_tax_long <- pivot_longer(Zim1,
+                                 cols=colnames(Zim1)[10:ncol(Zim1)],
+                                 names_to="shotgunid",
+                                 values_to="Abundance"
+                                  )
+Zim4_sg_tax_long <- pivot_longer(Zim4,
+                                 cols=colnames(Zim4)[10:ncol(Zim4)],
+                                 names_to="shotgunid",
+                                 values_to="Abundance"
+                                  )
+
+#Now we bind the two together
+Zim_all_sg_genera_pre <- rbind(Zim1_sg_tax_long,Zim4_sg_tax_long)
+
+
+#frac defines relavite abundances we also filter for bacteria
+Zim_all_sg_genera_ab <- Zim_all_sg_genera_pre[which(substr(Zim_all_sg_genera_pre$shotgunid,16,20)=="frac" & Zim_all_sg_genera_pre$domain=="Bacteria"),]
+Zim_all_sg_genera_ab$SampleID <- paste0(str_extract(Zim_all_sg_genera_ab$shotgunid, "ZIM.{3}"),".2")
+
+#num defines counts we also filter for bacteria
+Zim_all_sg_genera_ct <- Zim_all_sg_genera_pre[which(substr(Zim_all_sg_genera_pre$shotgunid,16,19)=="num" & Zim_all_sg_genera_pre$domain=="Bacteria"),]
+
+#We pull the ZIMID and add ".2" as all of there are baseline samples 
+Zim_all_sg_genera_ct$SampleID <- paste0(str_extract(Zim_all_sg_genera_ct$shotgunid, "ZIM.{3}"),".2")
+
+#We pivot to the wider format
+Zim_mic_sg_wide_pre <- pivot_wider(Zim_all_sg_genera_ct, 
+                               id_cols="SampleID",
+                               names_from="species",
+                               values_from="Abundance")
+
+
+#We pivot to wide for reformatting
+Zim_mic_sg_wide_pre <- as.data.frame(Zim_mic_sg_wide_pre)
+Zim_mic_sg_wide <- Zim_mic_sg_wide_pre[,c(1,which(colSums(Zim_mic_sg_wide_pre[2:ncol(Zim_mic_sg_wide_pre)])!=0)+1)]
+
+#We replace na values with zero
+for (r in 1:nrow(Zim_mic_sg_wide)) {
+  for (c in 1:ncol(Zim_mic_sg_wide)) {
+    if(is.na(Zim_mic_sg_wide[r,c])) {
+      Zim_mic_sg_wide[r,c] <- 0
+    }
+  }
+}
+
+
+#We need pull the count data
+Zim_mic_sg_wide.clr_pre <- Zim_mic_sg_wide
+
+#We then clr transform it so we first need to add 1
+Zim_mic_sg_wide.clr_pre[,2:ncol(Zim_mic_sg_wide.clr_pre)] <- Zim_mic_sg_wide.clr_pre[,2:ncol(Zim_mic_sg_wide.clr_pre)]+1
+
+#Now we CLR Transform
+Zim_mic_sg_wide.clr_pre[,2:ncol(Zim_mic_sg_wide.clr_pre)] <- clr(Zim_mic_sg_wide.clr_pre[,2:ncol(Zim_mic_sg_wide.clr_pre)])
+
+#Now after the transform we take out the bacterial species
+#We first pull those species names that are bacterial
+bac_species <- unique(colnames(Zim_mic_sg_wide.clr_pre)[which(colnames(Zim_mic_sg_wide.clr_pre) %in% Zim_all_sg_genera_pre$species[which(Zim_all_sg_genera_pre$domain=="Bacteria")])])
+
+
+#Now we include the genuses in th taxa name
+Zim_mic_sg_wide.clr <- Zim_mic_sg_wide.clr_pre[,c("SampleID",bac_species)]
+
+
+#Now we pull the Genus names
+fecal.species.names <- bac_species
+#They are renamed for simplicity
+colnames(Zim_mic_sg_wide.clr)[2:ncol(Zim_mic_sg_wide.clr)] <- paste0("s_sg_",2:ncol(Zim_mic_sg_wide.clr))
+
+fecal.species_ind <- paste0("g_sg_",2:ncol(Zim_mic_sg_wide.clr))
+
+
+Zim_mic_sg_wide.clr <- as.data.frame(Zim_mic_sg_wide.clr)
+
+#We now add them to the base and long files 
+base_with_sg_tax <- left_join(base, Zim_mic_sg_wide.clr, by="SampleID")
+
+
+#Now we do relative abundances for the abundance plot
+
+fecal.species.count_RA_for_plot_pre <- Zim_all_sg_genera_ab
+
+#We now use inner join to add it
+RA_plot_sg_tax <- inner_join(fecal.species.count_RA_for_plot_pre,base, by="SampleID")
+
+
+```
+
+####SHotgun Functional Data
+```{r}
+
+
+##SHotgun Functional Data Processing
+
+#Again both are pivotted to the longer format
+Zim1_KO_long <- pivot_longer(Zim1_KO, cols=colnames(Zim1_KO)[2:ncol(Zim1_KO)], names_to="Sample",values_to="RPK")
+Zim4_KO_long <- pivot_longer(Zim4_KO, cols=colnames(Zim4_KO)[2:ncol(Zim4_KO)], names_to="Sample",values_to="RPK")
+
+#Both are pulled together
+Zim_all_long <- rbind(Zim1_KO_long, Zim4_KO_long)
+
+#Unique genes are pulled
+Zim_KO <- unique(Zim_all_long$Gene.Family)
+
+#Stratified and Unstratified KOs are separated
+
+#Stratified include ones separated into specfic taxa (containing "|")
+Zim_all_long_strat <- Zim_all_long[grepl("\\|",Zim_all_long$`Gene.Family`),]
+
+#Unstratified include aggregated KOs (not containing "|") 
+Zim_all_long_unstrat <- Zim_all_long[!grepl("\\|",Zim_all_long$Gene.Family),]
+
+#Both are pivoted to the back to the wider format
+
+#Stratified 
+Zim_all_wide_strat <- pivot_wider(Zim_all_long_strat, id_cols="Sample",names_from="Gene.Family", values_from="RPK")
+#Unstratified 
+Zim_all_wide_unstrat <- pivot_wider(Zim_all_long_unstrat, id_cols="Sample",names_from="Gene.Family", values_from="RPK")
+
+#We generate the scaling factor for RpK to TPM conversion 
+
+#This is because TPM = (RPK/sum(RPK))*1000000
+
+#Scaling factors are the sums
+
+#Stratified
+Zim_all_wide_strat_Scaling_Factor <- rowSums(Zim_all_wide_strat[,2:ncol(Zim_all_wide_strat)], na.rm=TRUE)
+#Unstratified
+Zim_all_wide_unstrat_Scaling_Factor <- rowSums(Zim_all_wide_unstrat[,2:ncol(Zim_all_wide_unstrat)], na.rm=TRUE)
+
+#We pull the original data and (will fo row cell conversions)
+
+#Stratified
+Zim_all_wide_strat_TPM <- Zim_all_wide_strat
+#Unstratified
+Zim_all_wide_unstrat_TPM <- Zim_all_wide_unstrat
+
+#relative ABundance in More than
+Zim_unstrat_rel <- Zim_all_wide_unstrat
+Zim_unstrat_rel[,2:ncol(Zim_unstrat_rel)] <- Zim_unstrat_rel[,2:ncol(Zim_unstrat_rel)]/rowSums(Zim_unstrat_rel[,2:ncol(Zim_unstrat_rel)], na.rm=TRUE)
+
+
+Zim_unstrat_rel$SampleID <- paste0(str_extract(Zim_unstrat_rel$Sample, "ZIM.{3}"),".2")
+Zim_unstrat_rel_met <- inner_join(Zim_unstrat_rel, base, by="SampleID")
+
+Zim_unstrat_long <- pivot_longer(data=Zim_unstrat_rel_met,
+                                 cols=colnames(Zim_unstrat_rel)[2:(ncol(Zim_unstrat_rel)-1)],
+                                 values_to = "Abundance",
+                                 names_to = "KEGG")
+
+#Now we divide the number ones and sums and then multiply by 1000000
+
+#Stratified
+Zim_all_wide_strat_TPM[,2:ncol(Zim_all_wide_strat_TPM)] <- (Zim_all_wide_strat[,2:ncol(Zim_all_wide_strat)]/Zim_all_wide_strat_Scaling_Factor)*1000000
+#Unstratified
+Zim_all_wide_unstrat_TPM[,2:ncol(Zim_all_wide_unstrat_TPM)] <- (Zim_all_wide_unstrat[,2:ncol(Zim_all_wide_unstrat)]/Zim_all_wide_unstrat_Scaling_Factor)*1000000
+
+###Additional Processing on Unstratified
+
+#We pull the SampleID and from the clutted samle field 
+Zim_all_wide_unstrat$SampleID <- paste0(str_extract(Zim_all_wide_unstrat$Sample, "ZIM\\d{3}"),".2")
+#We pull the SampleID and from the clutted samle field 
+Zim_all_wide_unstrat_TPM$SampleID <- paste0(str_extract(Zim_all_wide_unstrat_TPM$Sample, "ZIM\\d{3}"),".2")
+
+
+#We add metadata using inner_join
+base_with_sg_fun <- inner_join(Zim_all_wide_unstrat_TPM, base, by="SampleID")
+
+
+```
+
+
+####18S Data
+
+```{r}
+
+###18S data is processed 
+
+#Mamallian ares removed
+Euk.18S.data_SEQ033_euk_nonmammal <- subset_taxa(Euk.18S.data_SEQ033, Kingdom=="d__Eukaryota" & Class!="Mammalia")
+Euk.18S.data_SEQ081_euk_nonmammal <- subset_taxa(Euk.18S.data_SEQ081, Kingdom=="d__Eukaryota" & Class!="Mammalia")
+
+#prepMDF is used to generate a long file with species and abundances
+Euk_18S_mdf_33 <- prep_mdf(Euk.18S.data_SEQ033_euk_nonmammal, subgroup_level="Species", as_relative_abundance = TRUE)
+Euk_18S_mdf_81 <- prep_mdf(Euk.18S.data_SEQ081_euk_nonmammal, subgroup_level="Species", as_relative_abundance = TRUE)
+
+#We selectoveralapping columns to combine (different metadata files causes errors)
+Euk_cols <- intersect(colnames(Euk_18S_mdf_33),colnames(Euk_18S_mdf_81))
+
+#We commbine the tables into one
+Euk_18S_mdf <- rbind(Euk_18S_mdf_33[,Euk_cols],Euk_18S_mdf_81[,Euk_cols])
+
+#We add sample IDs and PIDs
+Euk_18S_mdf$SampleID <- Euk_18S_mdf$Sample
+Euk_18S_mdf$PID <- substr(Euk_18S_mdf$Sample,1,6)
+
+all_18S_IDs <- unique(Euk_18S_mdf$Sample)
+Blast_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Blastocystis" & Euk_18S_mdf$Abundance>0.2)]
+Ent_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Entamoeba" & Euk_18S_mdf$Abundance>0.2)]
+Kom_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Komagataella" & Euk_18S_mdf$Abundance>0.2)]
+Str_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Strigeidida" & Euk_18S_mdf$Abundance>0.2)]
+
+Ent_Blast_data <- base
+
+Ent_Blast_data$DisplayWeek <- paste0(Ent_Blast_data$Week, " Weeks")
+
+Ent_Blast_data$Blastocystis <- ""
+Ent_Blast_data$Entamoeba <- ""
+Ent_Blast_data$Komagataella <- ""
+Ent_Blast_data$Strigeidida <- ""
+
+Ent_Blast_data$Blastocystis[which(Ent_Blast_data$SampleID %in% all_18S_IDs)] <- "No"
+Ent_Blast_data$Entamoeba[which(Ent_Blast_data$SampleID %in% all_18S_IDs)] <- "No"
+Ent_Blast_data$Komagataella[which(Ent_Blast_data$SampleID %in% all_18S_IDs)] <- "No"
+Ent_Blast_data$Strigeidida[which(Ent_Blast_data$SampleID %in% all_18S_IDs)] <- "No"
+
+Ent_Blast_data$Blastocystis[which(Ent_Blast_data$SampleID %in% Blast_IDs)] <- "Yes"
+Ent_Blast_data$Entamoeba[which(Ent_Blast_data$SampleID %in% Ent_IDs)] <- "Yes"
+Ent_Blast_data$Komagataella[which(Ent_Blast_data$SampleID %in% Kom_IDs)] <- "Yes"
+Ent_Blast_data$Strigeidida[which(Ent_Blast_data$SampleID %in% Str_IDs)] <- "Yes"
+
+
+Ent_Blast_data_add <- Ent_Blast_data[,c("SampleID","Blastocystis","Entamoeba")]
+
+base_with_18S <- inner_join(base,Ent_Blast_data_add, by="SampleID")
+
+```
+
+####Metdata Add Ons
+
+```{r}
+
+###Alpha diversity and 18S results are added to all the Values
+base <- left_join(base,fecal.faith_add, by="SampleID")
+base <- left_join(base,fecal.shannon_add, by="SampleID")
+base <- left_join(base,Ent_Blast_data_add, by="SampleID")
+
+
+```
+
+###Necessary Objects are Saved
+```{r}
+
+# Metadata files
+  #base: all processed metadata
+  #long: all processed metadata from samples collected at both timepoints
+
+metadata_objects <- c("base", "long")
+saveRDS(metadata_objects, file = "important_objects.RData")
+
+# A list of all objects in your current workspace
+all_objects <- ls()
+rm(list = all_objects)
+
+```
+
