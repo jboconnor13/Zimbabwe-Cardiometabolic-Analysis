@@ -1,0 +1,89 @@
+---
+title: "Cardiometabolic Differences and Changes"
+author: "J. O'Connor"
+date: "2025-09-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Cardiometabolic Differences and Changes
+
+This markdown completed the analysis comparing cardiometabolic markers across groups and looking at longitudinal changes 
+
+### Function Sourcing
+
+First the functions are all sourced
+```{r Functions, message=FALSE, warning=FALSE}
+#To access the functions directory why must direct to the parent directory
+setwd("../..")
+
+#A list of the function files is pulled
+function_files <- list.files(paste0(getwd(),"/Functions"), pattern = "\\.R$", full.names = TRUE)
+#Those functions are then sourced
+lapply(function_files, source)
+```
+
+
+### Data Loading
+
+We load all the data of interest
+
+```{r data_load, echo=FALSE}
+#All Metadata objects have been stored in one location
+metadata_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/metadata_objects.RDS")
+
+#Metdata objects
+  #base: all processed metadata
+  base <- metadata_objects$base
+
+```
+
+###Cross Sectional Differences
+
+We compare differences in cardiometabolic variables across cohorts at different timepoints
+
+```{r}
+
+
+#Metabolic outcome variables are defined
+
+#HDL: plasma high-density lipoprotein cholesterol (HDL-C)
+#LDL: plasma low-density lipoprotein cholesterol (HDL-C)
+#Trig: plasma triglycerides
+#Glucose: Plasma glucose
+
+met_vars <- c("HDL",
+              "LDL",
+              "Trig",
+              "Glucose")
+
+
+## Cross Sectional Statistics
+
+# Stats will be generated across groups (i.e. Cohort) using the gp_stat_sum function
+
+# Initially statistics are performed on cohorts at different time points
+
+met_cs_stats_co <- gp_stat_sum(data=base,               #Data set specified
+                                 sub_vars="Week",      #Subset variable for stratification is selected
+                                 dep_vars=met_vars,     #Dependent variables are the met_vars previously defined
+                                 gp_var="Cohort",       #Group variable is cohort
+                                 normality= FALSE,      #Data has not been normalized so we are doing nonparametric tests
+                                 adj="bonferroni"       #p-value adjustment method is Bonferroni
+                                 )  
+```
+
+
+###Longitudinal Changes
+
+We compare which cardiometabolic measures changed throughout the study period
+```{r}
+
+```
+
+
+###Final Plot Save
+
