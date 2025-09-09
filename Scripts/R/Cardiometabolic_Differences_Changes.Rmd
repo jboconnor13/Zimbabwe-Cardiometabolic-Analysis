@@ -38,6 +38,7 @@ metadata_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/met
 #Metdata objects
   #base: all processed metadata
   base <- metadata_objects$base
+  long <- metadata_objects$long
 
 ```
 
@@ -60,30 +61,217 @@ met_vars <- c("HDL",
               "Trig",
               "Glucose")
 
+#A dislay week helps for the plots (add a weeks label
+base$DisplayWeek <- paste0(base$Week, " Weeks")
 
 ## Cross Sectional Statistics
 
 # Stats will be generated across groups (i.e. Cohort) using the gp_stat_sum function
 
-# Initially statistics are performed on cohorts at different time points
+# Statistics are performed on cohorts at different time points
 
-met_cs_stats_co <- gp_stat_sum(data=base,               #Data set specified
-                                 sub_vars="Week",      #Subset variable for stratification is selected
-                                 dep_vars=met_vars,     #Dependent variables are the met_vars previously defined
-                                 gp_var="Cohort",       #Group variable is cohort
-                                 normality= FALSE,      #Data has not been normalized so we are doing nonparametric tests
-                                 adj="bonferroni"       #p-value adjustment method is Bonferroni
-                                 )  
+met_stats_co <- gp_stat_sum(data=base,            #Data set specified
+                            sub_vars="DisplayWeek",      #Subset variable for stratification is selected
+                            dep_vars=met_vars,    #Dependent variables are the met_vars previously defined
+                            gp_var="Cohort",      #Group variable is cohort
+                            normality= FALSE,     #Data has not been normalized so we are doing nonparametric tests
+                            adj="bonferroni"      #p-value adjustment method is Bonferroni
+                            )  
+
+#We add units to the measure for display later
+met_stats_co$DisplayMeasure <- gsub("DL","DL-C (mg/dL)",met_stats_co$Measure)
+met_stats_co$DisplayMeasure <- gsub("Trig","Triglycerides (mg/dL)",met_stats_co$DisplayMeasure)
+met_stats_co$DisplayMeasure <- gsub("Glucose","Glucose (mg/dL)",met_stats_co$DisplayMeasure)
+
+#We restrtcture Display Week and Cohort to mimick the data for the plot
+met_stats_co$group1 <- factor(met_stats_co$group1, levels=c("Naïve", "Exp", "HC"), ordered=TRUE)
+met_stats_co$group2 <- factor(met_stats_co$group2, levels=c("Naïve", "Exp", "HC"), ordered=TRUE)
+met_stats_co$DisplayWeek <- factor(met_stats_co$DisplayWeek, levels=c("0 Weeks", "24 Weeks"), ordered=TRUE)
+
 ```
 
 
 ###Longitudinal Changes
 
 We compare which cardiometabolic measures changed throughout the study period
+
 ```{r}
+
+## Longitduinal Statistics
+
+# Stats will be generated for longitudinal changes using the long_stat_sum function
+
+
+
+met_stats_long <- long_stat_sum(data=base,                   #Data set specified
+                                sub_vars="Cohort",           #Subset variable for stratification is selected#
+                                tm_var="DisplayWeek",               #The time variable is elected
+                                dep_vars=met_vars,           #Dependent variables are the met_vars previously defined 
+                                rand_var="PID",              #Random variable (patient ID) is selected
+                                normality=FALSE,             #Data has not been normalized so we are doing nonparametric tests
+                                adj="bonferroni",            #p-value adjustment method is Bonferroni
+                                pw="separate")               #pairwise comparisons are a wilcoxon
+
+#We add units to the measure for display later
+met_stats_long$DisplayMeasure <- gsub("DL","DL-C (mg/dL)",met_stats_long$Measure)
+met_stats_long$DisplayMeasure <- gsub("Trig","Triglycerides (mg/dL)",met_stats_long$DisplayMeasure)
+met_stats_long$DisplayMeasure <- gsub("Glucose","Glucose (mg/dL)",met_stats_long$DisplayMeasure)
+
+#We specify the factors for the weeks and cohort to coicide with the plot
+met_stats_long$group1 <- factor(met_stats_long$group1, levels=c("0 Weeks", "24 Weeks"), ordered=TRUE)
+met_stats_long$group2 <- factor(met_stats_long$group2, levels=c("0 Weeks", "24 Weeks"), ordered=TRUE)
+
+met_stats_long$Cohort <- factor(met_stats_long$Cohort, levels=c("Naïve", "Exp", "HC"), ordered=TRUE)
+
 
 ```
 
 
-###Final Plot Save
+###Data Restructuring for Plots
+```{r}
+#We generate a long data set with metabolic markers
+base_met_long <- pivot_longer(data=base,
+                              cols=met_vars,
+                              values_to = "Amount",
+                              names_to = "Measure") 
+
+
+#We add units to the measure for display later
+
+base_met_long$DisplayMeasure <- gsub("DL","DL-C (mg/dL)",
+base_met_long$Measure)
+
+base_met_long$DisplayMeasure <- gsub("Trig","Triglycerides (mg/dL)",
+base_met_long$DisplayMeasure)
+
+base_met_long$DisplayMeasure <- gsub("Glucose","Glucose (mg/dL)",
+base_met_long$DisplayMeasure)
+
+#We restructure the weeks to be ordered
+base_met_long$DisplayWeek <- factor(base_met_long$DisplayWeek, levels=c("0 Weeks", "24 Weeks"), ordered=TRUE)
+
+base_met_long$Cohort <- factor(base_met_long$Cohort, levels=c("Naïve", "Exp", "HC"), ordered=TRUE)
+
+
+```
+
+###Final Figure Saving
+```{r}
+# First I use them same color scheme as described in Zim1 
+cohortColors <- palette(brewer.pal(n = 5, name = "BrBG"))
+cohortColors <- palette(brewer.pal(n = 5, name = "BrBG")) #Repeated to solidify? 
+visitColors <- palette(brewer.pal(n = 5, name = "PiYG")) 
+visitColors <- palette(brewer.pal(n = 5, name = "PiYG")) #repeat to solidify
+
+
+#We fliter to inlcude the significant values
+base_met_long_select <- base_met_long[which(base_met_long$Measure %in% c("HDL","Trig", "Glucose")),]
+
+#Healthy range values are put in 
+# Max min data is also generated for the healthy range boxes
+
+# Then we do it for the remaining
+healthy_range <- data.frame(DisplayMeasure=c("HDL-C (mg/dL)","Triglycerides (mg/dL)","Glucose (mg/dL)"),
+  Measure=c("HDL","Trig","Glucose"),
+                            Healthy_Min=c(40,0,0),
+                            Healthy_Max=c(Inf,100,100)) #Log scale *log10(100)
+
+
+#Boxplot
+met_box_plot <- ggplot(data = base_met_long_select,
+                      mapping = aes(x = Cohort, y = Amount, fill=Cohort)) +
+                      geom_rect(data = healthy_range, 
+                                aes(ymin = Healthy_Min, ymax = Healthy_Max, xmin=-Inf, xmax=Inf), 
+                                    fill = "green", 
+                                    alpha=0.25,
+                                    inherit.aes = FALSE)+
+                      geom_boxplot(aes(x = Cohort, y = Amount, fill=Cohort), 
+                                   outliers = FALSE) +
+                      geom_jitter(aes(x = Cohort, y = Amount, fill=Cohort)) +
+                      scale_fill_manual(values=c(cohortColors[1],
+                                                 cohortColors[3],
+                                                 cohortColors[5],
+                                                 cohortColors[1],
+                                                 cohortColors[3],
+                                                 cohortColors[5]))+
+                      scale_y_log10()+
+                      labs(y="Metabolic Measure", tag="B")+
+                      theme_classic() +
+                      theme(legend.position = "none",
+                            legend.title = element_text(size = 20),
+                            legend.text = element_text(size = 20),
+                            axis.text.x = element_text(size = 15),
+                            axis.title.y = element_text(size = 20),
+                            axis.title.x = element_blank(),
+                            axis.text.y = element_text(size = 15),
+                            strip.text.x = element_text(size=15),
+                            strip.text.y = element_text(size=15),
+                            plot.tag = element_text(size=25),
+                            ggh4x.facet.nestline = element_blank(),
+                            strip.background.x = element_rect(color="black", fill="gray", linetype="solid"),
+                            strip.background.y = element_rect(color="black", fill="gray", linetype="solid")) +
+                      facet_nested(cols=vars(DisplayWeek), 
+                                   rows=vars(DisplayMeasure),
+                                  scales="free_y") +
+                      stat_pvalue_manual(met_stats_co,
+                                         y.position=2.3,
+                                        label = "p.signif",
+                                        hide.ns = TRUE,
+                                        step.increase = 0.1
+                                        ) 
+
+saveRDS(met_box_plot, file = "../../Figures/Panels/FIG1B.RDS")
+
+
+#Violin Plot
+met_violin_plot <- ggplot(data = base_met_long_select,
+                      mapping = aes(x = DisplayWeek, y = Amount, fill=DisplayWeek)) +
+                      geom_rect(data = healthy_range, 
+                                aes(ymin = Healthy_Min, ymax = Healthy_Max, xmin=-Inf, xmax=Inf), 
+                                    fill = "green", 
+                                    alpha=0.25,
+                                    inherit.aes = FALSE)+
+                      geom_violin()+
+                      geom_line(mapping = aes(group = PID),
+                                position = position_dodge(0.1),
+                                alpha = 0.3,
+                                size=.5) +
+                      geom_point(mapping = aes(fill = Week, group = PID),
+                                size = 2, 
+                                shape = 21,
+                                position = position_dodge(0.1)) +
+                      scale_fill_manual(values=c(visitColors[1],
+                                                 visitColors[5],
+                                                 visitColors[1],
+                                                 visitColors[5]))+
+                      scale_y_log10()+
+                      labs(y="Cardiometabolic Measure", tag="C")+
+                      theme_classic() +
+                      theme(legend.position = "none",
+                            legend.title = element_text(size = 20),
+                            legend.text = element_text(size = 20),
+                            axis.text.x = element_text(size = 15, hjust=1, angle=45),
+                            axis.title.y = element_text(size = 20),
+                            axis.title.x = element_blank(),
+                            axis.text.y = element_text(size = 15),
+                            strip.text.x = element_text(size=15),
+                            strip.text.y = element_text(size=15),
+                            plot.tag = element_text(size=25),
+                            ggh4x.facet.nestline = element_blank(),
+                            strip.background.x = element_rect(color="black", fill="gray", linetype="solid"),
+                            strip.background.y = element_rect(color="black", fill="gray", linetype="solid")) +
+                      facet_nested(cols=vars(Cohort), 
+                                   rows=vars(DisplayMeasure),
+                                  scales="free_y") +
+                      stat_pvalue_manual(met_stats_long,
+                                        label = "p.signif",
+                                        hide.ns = TRUE,
+                                        y.position=c(2.35,2.78,2.25)
+                                        ) 
+
+saveRDS(met_violin_plot, file = "../../Figures/Panels/FIG1C.RDS")
+
+
+```
+
 
