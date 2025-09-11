@@ -112,6 +112,10 @@ met_stats_long <- long_stat_sum(data=base,                   #Data set specified
                                 adj="bonferroni",            #p-value adjustment method is Bonferroni
                                 pw="separate")               #pairwise comparisons are a wilcoxon
 
+
+  
+
+
 #We add units to the measure for display later
 met_stats_long$DisplayMeasure <- gsub("DL","DL-C (mg/dL)",met_stats_long$Measure)
 met_stats_long$DisplayMeasure <- gsub("Trig","Triglycerides (mg/dL)",met_stats_long$DisplayMeasure)
@@ -155,7 +159,7 @@ base_met_long$Cohort <- factor(base_met_long$Cohort, levels=c("Naïve", "Exp", "
 
 ```
 
-###Final Figure Saving
+###Figure Saving
 ```{r}
 # First I use them same color scheme as described in Zim1 
 cohortColors <- palette(brewer.pal(n = 5, name = "BrBG"))

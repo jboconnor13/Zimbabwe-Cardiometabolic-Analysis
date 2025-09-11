@@ -945,10 +945,24 @@ print(adonis_results)
 
 ###Final Confounders Saved
 ```{r}
-conf_vars <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05)])
+#All counfounders
+conf_vars_all <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05)])
 
+#Confounders for specific variables 
+conf_vars_HDL <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05 & t1_data_bw_selected$Outcome=="HDL")])
+conf_vars_LDL <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05 & t1_data_bw_selected$Outcome=="LDL")])
+conf_vars_Trig <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05 & t1_data_bw_selected$Outcome=="Trig")])
+conf_vars_Glucose <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05 & t1_data_bw_selected$Outcome=="Glucose")])
+
+conf_vars <- list(conf_vars_all=conf_vars_all,
+                  conf_vars_HDL=conf_vars_HDL,
+                  conf_vars_LDL=conf_vars_LDL,
+                  conf_vars_Trig=conf_vars_Trig,
+                  conf_vars_Glucose=conf_vars_Glucose)
 
 saveRDS(conf_vars, file = "../../Data/R_Data/conf_vars.RDS")
+
+
 
 ```
 
@@ -991,9 +1005,8 @@ BW_Selection_Plot <- ggplot(t1_data_bw_selected, aes(y = Predictor, x = DisplayO
 saveRDS(BW_Selection_Plot, file = "../../Figures/Panels/FIG1A.RDS")
 
 #Age Scatter plots
-
-#Triglycerides and Age
-Trig_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=Trig, fill=Cohort)) +
+#LDL and Age
+Glucose_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=Glucose, fill=Cohort)) +
             geom_line(aes(group=PID), alpha=0.3)+
             geom_point(shape=21, size=3, stroke=1) + 
         scale_y_log10()+
@@ -1004,10 +1017,10 @@ Trig_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=Trig, fill=Coho
                                    "gray",
                                    cohortColors[5]))+
         scale_color_identity() +
-    geom_smooth(aes(x=base_t1$Visit_Age, y=base_t1$Trig), 
+    geom_smooth(aes(x=base_t1$Visit_Age, y=base_t1$Glucose), 
                 method="lm", se=TRUE, inherit.aes=FALSE) +
         theme_bw() +
-        labs(y="Triglycerides (mg/dL)",x="Age (years)", tag="A") +
+        labs(y="Glucose (mg/dL)",x="Age (years)", tag="B") +
         theme(legend.position = "bottom",
               legend.text = element_text(size=15),
               legend.title = element_blank(),
@@ -1026,7 +1039,11 @@ Trig_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=Trig, fill=Coho
             color="black", fill="gray", linetype="solid"
         ))
 
-saveRDS(Trig_Age_Plot, file = "../../Figures/Panels/FIGS1A.RDS")
+saveRDS(Glucose_Age_Plot, file = "../../Figures/Panels/FIGS1B.RDS")
+
+
+
+
 
 #LDL and Age
 LDL_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=LDL, fill=Cohort)) +
@@ -1043,7 +1060,7 @@ LDL_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=LDL, fill=Cohort
     geom_smooth(aes(x=base_t1$Visit_Age, y=base_t1$LDL), 
                 method="lm", se=TRUE, inherit.aes=FALSE) +
         theme_bw() +
-        labs(y="LDL-C (mg/dL)",x="Age (years)", tag="B") +
+        labs(y="LDL-C (mg/dL)",x="Age (years)", tag="C") +
         theme(legend.position = "bottom",
               legend.text = element_text(size=15),
               legend.title = element_blank(),
@@ -1062,7 +1079,43 @@ LDL_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=LDL, fill=Cohort
             color="black", fill="gray", linetype="solid"
         ))
 
-saveRDS(LDL_Age_Plot, file = "../../Figures/Panels/FIGS1B.RDS")
+saveRDS(LDL_Age_Plot, file = "../../Figures/Panels/FIGS1C.RDS")
+
+#Triglycerides and Age
+Trig_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=Trig, fill=Cohort)) +
+            geom_line(aes(group=PID), alpha=0.3)+
+            geom_point(shape=21, size=3, stroke=1) + 
+        scale_y_log10()+
+        scale_fill_manual(values=c(cohortColors[1],
+                                   "gray",
+                                   cohortColors[5]))+
+  scale_color_manual(values=c(cohortColors[1],
+                                   "gray",
+                                   cohortColors[5]))+
+        scale_color_identity() +
+    geom_smooth(aes(x=base_t1$Visit_Age, y=base_t1$Trig), 
+                method="lm", se=TRUE, inherit.aes=FALSE) +
+        theme_bw() +
+        labs(y="Triglycerides (mg/dL)",x="Age (years)", tag="D") +
+        theme(legend.position = "bottom",
+              legend.text = element_text(size=15),
+              legend.title = element_blank(),
+          axis.text.x = element_text(size = 12),
+          axis.title.y = element_text(size=15),
+          axis.title.x = element_text(size=15),
+          axis.text.y = element_text(size = 12),
+          strip.text.x = element_text(size=12),
+          strip.text.y = element_text(size=10),
+          plot.tag = element_text(size=25),
+          ggh4x.facet.nestline = element_blank(),
+          strip.background.x = element_rect(
+            color="black", fill="gray", linetype="solid"
+          ),
+          strip.background.y = element_rect(
+            color="black", fill="gray", linetype="solid"
+        ))
+
+saveRDS(Trig_Age_Plot, file = "../../Figures/Panels/FIGS1D.RDS")
 
 
 #Grain Scatter Plot

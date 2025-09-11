@@ -1,0 +1,200 @@
+---
+title: "Dietary Differences and Changes"
+author: "J. O'Connor"
+date: "2025-09-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Cardiometabolic Differences and Changes
+
+This markdown completed the analysis comparing dietary macronutrient totals across groups and looking at longitudinal changes 
+
+### Function Sourcing
+
+First the functions are all sourced
+```{r Functions, message=FALSE, warning=FALSE}
+#To access the functions directory why must direct to the parent directory
+setwd("../..")
+
+#A list of the function files is pulled
+function_files <- list.files(paste0(getwd(),"/Functions"), pattern = "\\.R$", full.names = TRUE)
+#Those functions are then sourced
+lapply(function_files, source)
+```
+
+
+### Data Loading
+
+We load all the data of interest
+
+```{r data_load, echo=FALSE}
+#All Metadata objects have been stored in one location
+metadata_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/metadata_objects.RDS")
+
+#Metdata objects
+  #base: all processed metadata
+  base <- metadata_objects$base
+  long <- metadata_objects$long
+
+```
+
+###Cross Sectional Differences
+
+We compare differences in dietary variables across cohorts at different timepoints
+
+```{r}
+
+
+#Dietary Totals are defined
+#Dietary Information:
+  #Total_Dairy
+  #Total_Fruit
+  #Total_Veg
+  #Total_Protein
+  #Total_Grain  
+  #Total_Fast_Food
+  #Total_Drinks
+  #Total_Snacks
+
+diet_vars <- c("Total_Dairy",
+           "Total_Fruit",
+           "Total_Veg" ,
+           "Total_Protein",
+           "Total_Grain",
+           "Total_Fast_Food",
+           "Total_Drinks",
+           "Total_Snacks"
+           )
+
+
+
+#A dislay week helps for the plots (add a weeks label
+base$DisplayWeek <- paste0(base$Week, " Weeks")
+
+## Cross Sectional Statistics
+
+# Stats will be generated across groups (i.e. Cohort) using the gp_stat_sum function
+
+# Statistics are performed on cohorts at different time points
+
+diet_stats_co <- gp_stat_sum(data=base,            #Data set specified
+                            sub_vars="DisplayWeek",      #Subset variable for stratification is selected
+                            dep_vars=diet_vars,    #Dependent variables are the diet_vars previously defined
+                            gp_var="Cohort",      #Group variable is cohort
+                            normality= FALSE,     #Data has not been normalized so we are doing nonparametric tests
+                            adj="bonferroni"      #p-value adjustment method is Bonferroni
+                            )  
+
+
+#We restrutture Display Week and Cohort to mimick the data for the plot
+diet_stats_co$group1 <- factor(diet_stats_co$group1, levels=c("Naïve", "Exp", "HC"), ordered=TRUE)
+diet_stats_co$group2 <- factor(diet_stats_co$group2, levels=c("Naïve", "Exp", "HC"), ordered=TRUE)
+diet_stats_co$DisplayWeek <- factor(diet_stats_co$DisplayWeek, levels=c("0 Weeks", "24 Weeks"), ordered=TRUE)
+
+```
+
+
+###Longitudinal Changes
+
+We compare which dietary measures changed throughout the study period
+
+```{r}
+
+## Longitduinal Statistics
+
+# Stats will be generated for longitudinal changes using the long_stat_sum function
+
+
+
+diet_stats_long <- long_stat_sum(data=base,                   #Data set specified
+                                sub_vars="Cohort",           #Subset variable for stratification is selected#
+                                tm_var="DisplayWeek",               #The time variable is elected
+                                dep_vars=diet_vars,           #Dependent variables are the diet_vars previously defined 
+                                rand_var="PID",              #Random variable (patient ID) is selected
+                                normality=FALSE,             #Data has not been normalized so we are doing nonparametric tests
+                                adj="bonferroni",            #p-value adjustment method is Bonferroni
+                                pw="separate")               #pairwise comparisons are a wilcoxon
+
+
+#We specify the factors for the weeks and cohort to coicide with the plot
+diet_stats_long$group1 <- factor(diet_stats_long$group1, levels=c("0 Weeks", "24 Weeks"), ordered=TRUE)
+diet_stats_long$group2 <- factor(diet_stats_long$group2, levels=c("0 Weeks", "24 Weeks"), ordered=TRUE)
+
+diet_stats_long$Cohort <- factor(diet_stats_long$Cohort, levels=c("Naïve", "Exp", "HC"), ordered=TRUE)
+
+
+```
+
+
+###Figure Saving
+```{r}
+# First I use them same color scheme as described in Zim1 
+cohortColors <- palette(brewer.pal(n = 5, name = "BrBG"))
+cohortColors <- palette(brewer.pal(n = 5, name = "BrBG")) #Repeated to solidify? 
+
+#Data is refrmatted to long
+
+total_diet_base_long <- pivot_longer(data=base,
+                                   cols=diet_vars,
+                                   names_to="Measure",
+                                   values_to="Total")
+
+#Display week is formatted for the plot 
+total_diet_base_long$DisplayWeek <-  factor(total_diet_base_long$DisplayWeek, levels=c("0 Weeks", "24 Weeks"), ordered=TRUE)
+
+
+
+#We adjust the stats to make it fit in the graph
+diet_stats_co$Measure <- factor(diet_stats_co$Measure, levels=diet_vars)
+
+diet_stats_co$xmin <- as.numeric(diet_stats_co$Measure)-.2+ ((as.numeric(diet_stats_co$group1)-1)*(.2))
+diet_stats_co$xmax <- as.numeric(diet_stats_co$Measure)-.2+ ((as.numeric(diet_stats_co$group2)-1)*(.2))
+
+
+#Boxplot is generated
+#Boxplot
+tot_diet_box_plot <- ggplot(total_diet_base_long, aes(x=Measure, y=Total)) +
+  geom_boxplot(aes(fill=Cohort))+
+#  scale_y_log10() +
+  scale_fill_manual(values=c("#A6611A","gray","#018571"), name="Cohort")+
+  labs(y="Amount", x="", tag="A")+
+  theme_bw()+
+  theme(legend.position = "bottom",
+        legend.title = element_text(size = 10),
+        legend.text = element_text(size = 10),
+        axis.text.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10),
+        axis.title.x = element_blank(),
+        axis.text.y = element_text(size = 10),
+        strip.text.x = element_text(size=10),
+        strip.text.y = element_text(size=10),
+        plot.tag = element_text(size=25),
+        strip.background.x = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ),
+        strip.background.y = element_rect(
+          color="black", fill="gray", linetype="solid"
+        )) +
+  stat_pvalue_manual(
+    diet_stats_co,
+    label = "p.signif",
+    y.position = 27,
+    hide.ns=TRUE,
+    step.increase = 0.1,
+    step.group.by = "Measure"
+  ) +
+  facet_nested(rows=vars(DisplayWeek))
+
+
+
+saveRDS(tot_diet_box_plot, file = "../../Figures/Panels/FIGS1A.RDS")
+
+
+
+```
+
+

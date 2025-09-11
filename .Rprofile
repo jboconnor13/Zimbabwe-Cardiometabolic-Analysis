@@ -65,6 +65,7 @@ library(tidybayes)
 library(tidyr)
 library(vegan)
 library(utils)
+library(r2glmm)
 
 message("Libraries Loaded complete!")
 

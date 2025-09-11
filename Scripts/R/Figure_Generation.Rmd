@@ -1,0 +1,65 @@
+---
+title: "Figure Generation"
+author: "J. O'Connor"
+date: "2025-09-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This R Markdown creates and exports all the Figures for the manuscript
+
+###Figure Loading
+```{r}
+#Figure 1
+FIG1A <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG1A.RDS")
+FIG1B <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG1B.RDS")
+FIG1C <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG1C.RDS")
+
+#Figure S1
+FIGS1A <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS1A.RDS")
+FIGS1B <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS1B.RDS")
+FIGS1C <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS1C.RDS")
+FIGS1D <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS1D.RDS")
+
+#Figure S2
+FIGS2A <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS2A.RDS")
+FIGS2B <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS2B.RDS")
+
+```
+
+###Figure 1
+```{r}
+#Cardiometabolic Confounders (Fig 1A), Cross Sectional Differences (Fig 1B), and Longitudinal Changes (Fig 1C)
+
+Fig1 <- ggarrange(FIG1A,FIG1B,FIG1C, nrow=1)
+
+saveRDS(Fig1, file = "../../Figures/Finals/Fig1.RDS")
+
+```
+
+###Figure S1
+```{r}
+#Dietary Cross Sectional Differences (Fig S1A) and Age Cardiometabolic scatters ( FIg S1B, C, and D) 
+
+FigS1BCD <- ggarrange(FIGS1B,FIGS1C,FIGS1D, nrow=1, common.legend = TRUE, legend="bottom")
+
+FigS1 <- ggarrange(FIGS1A,FigS1BCD, nrow=2)
+
+saveRDS(FigS1, file = "../../Figures/Finals/FigS1.RDS")
+
+```
+
+###Figure S2
+```{r}
+#Results of linear mixed effects models relating inflammation to cardiometabolic outcomes in all participants (Fig S2A) and naive participants (Sig S2B)
+
+FigS2 <- ggarrange(FIGS2A, FIGS2B, common.legend = TRUE, legend="bottom")
+
+
+```
+
