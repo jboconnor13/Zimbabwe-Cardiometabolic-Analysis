@@ -29,6 +29,7 @@ FIGS1D <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS1D.RDS
 #Figure S2
 FIGS2A <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS2A.RDS")
 FIGS2B <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS2B.RDS")
+FIGS2C <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS2C.RDS")
 
 ```
 
@@ -56,9 +57,11 @@ saveRDS(FigS1, file = "../../Figures/Finals/FigS1.RDS")
 
 ###Figure S2
 ```{r}
-#Results of linear mixed effects models relating inflammation to cardiometabolic outcomes in all participants (Fig S2A) and naive participants (Sig S2B)
+#Changes in IL6 in the naive group (FIg S2A) as well as Results of linear mixed effects models relating inflammation to cardiometabolic outcomes in all participants (Fig S2B) and naive participants (Sig S2C)
 
-FigS2 <- ggarrange(FIGS2A, FIGS2B, common.legend = TRUE, legend="bottom")
+FigS2BC <- ggarrange(FIGS2B, FIGS2C, common.legend = TRUE, legend="bottom")
+
+FigS2 <- ggarrange(FIGS2A, FigS2BC, widths=c(1,2.5))
 
 
 ```

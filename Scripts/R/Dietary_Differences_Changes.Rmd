@@ -119,6 +119,12 @@ diet_stats_long <- long_stat_sum(data=base,                   #Data set specifie
                                 adj="bonferroni",            #p-value adjustment method is Bonferroni
                                 pw="separate")               #pairwise comparisons are a wilcoxon
 
+#Manual correction because it does so by group
+diet_stats_long$padj[which(diet_stats_long$Cohort=="Naïve")] <- p.adjust(diet_stats_long$`p-value`[which(diet_stats_long$Cohort=="Naïve")], method="fdr")
+diet_stats_long$padj[which(diet_stats_long$Cohort=="Exp")] <- p.adjust(diet_stats_long$`p-value`[which(diet_stats_long$Cohort=="Exp")], method="fdr")
+diet_stats_long$padj[which(diet_stats_long$Cohort=="HC")] <- p.adjust(diet_stats_long$`p-value`[which(diet_stats_long$Cohort=="HC")], method="fdr") 
+diet_stats_long$p.signif <- add_asterisks(diet_stats_long$padj)   
+
 
 #We specify the factors for the weeks and cohort to coicide with the plot
 diet_stats_long$group1 <- factor(diet_stats_long$group1, levels=c("0 Weeks", "24 Weeks"), ordered=TRUE)
