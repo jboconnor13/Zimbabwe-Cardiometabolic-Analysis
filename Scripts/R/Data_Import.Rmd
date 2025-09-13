@@ -503,11 +503,15 @@ base <- left_join(base,Ent_Blast_data_add, by="SampleID")
   #fecal.gen.names: original genus names
   #RA_plot_16S: data frame with relative abundances for barplot
   #fecal.tax.plot.data: 16S phyloseq object 
+  #fecal.wu.biplot:Weighted Unifrac Biplot Objects
+  #fecal.wu.matrix: Weighted uniFrac Matrix
   mic_16S_objects <- list(base=base,
                           base_with_16S=base_with_16S, 
                           fecal.gen.names=fecal.gen.names, 
                           RA_plot_16S=RA_plot_16S,
-                          fecal.tax.plot.data=fecal.tax.plot.data)
+                          fecal.tax.plot.data=fecal.tax.plot.data,
+                          fecal.wu.biplot=fecal.wu.biplot,
+                          fecal.wu.matrix=fecal.wu.matrix)
   saveRDS(mic_16S_objects, file = "../../Data/R_Data/mic_16S_objects.RDS")
   
 #Shotgun Taxonomic Objects

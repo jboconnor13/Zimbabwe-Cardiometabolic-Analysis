@@ -11,6 +11,19 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## R Markdown
 
+### Function Sourcing
+
+First the functions are all sourced
+```{r Functions, message=FALSE, warning=FALSE}
+#To access the functions directory why must direct to the parent directory
+setwd("../..")
+
+#A list of the function files is pulled
+function_files <- list.files(paste0(getwd(),"/Functions"), pattern = "\\.R$", full.names = TRUE)
+#Those functions are then sourced
+lapply(function_files, source)
+```
+
 ###Data Loading
 ```{r}
 
@@ -86,7 +99,7 @@ diff_vars <- c("HDL",
 
 ```{r}
 #We load previously determined measures that changed
-delta_inf_vars <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/delta_inf_vars.RDS")
+inf_diff_vars <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/delta_inf_vars.RDS")
 
 
 delta_inf_med_data <- delta_base
@@ -356,6 +369,145 @@ imm_y_ast <- add_asterisks(imm_coef_y_select$`Pr(>|t|)`)[2]
 print(paste0("Label Predictor to Mediator:",round(imm_m_coef,2),"(",imm_m_ast,")"))
 print(paste0("Label Mediator to Outcome:",paste0(round(imm_0_coef,2),imm_0_ast,"(",round(imm_y_coef,2),imm_y_ast,")")))
 print(paste0("Label Predictor to Outcome:",paste0(round(imm_my_coef,2),imm_my_ast)))
+
+```
+
+####Diversity
+
+```{r}
+
+#We load previously determined measures that changed
+div_diff_vars <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/delta_div_vars.RDS")
+
+
+delta_div_med_data <- delta_base
+
+div_all_vars <- c(diff_vars,div_diff_vars)
+
+for (c in 1:length(div_all_vars)) {
+  var_c <- div_all_vars[c]
+  delta_div_med_data$V <- NA
+  
+  for (r in 1:nrow(delta_div_med_data)) {
+    pid_r <- delta_div_med_data$PID[r]
+    row_0 <- which(met_lmer_data$PID==pid_r & met_lmer_data$DisplayWeek=="0 Weeks")
+    row_24 <- which(met_lmer_data$PID==pid_r & met_lmer_data$DisplayWeek=="24 Weeks")
+    if (length(row_0)==1 & length(row_24)==1) {
+      delta_div_med_data$V[r] <- as.numeric(met_lmer_data[row_24,var_c]) - as.numeric(met_lmer_data[row_0,var_c])
+    }
+  }
+  colnames(delta_div_med_data)[ncol(delta_div_med_data)] <- paste0("delta_",var_c)
+  
+}
+
+div_med_results <- unique(expand.grid(diff_vars,div_diff_vars))
+colnames(div_med_results) <- c("Outcome","Mediator")
+
+
+div_med_results$ACME <- NA
+div_med_results$ACME_Low <- NA
+div_med_results$ACME_High <- NA
+div_med_results$ACME_pval <- NA
+
+div_med_results$ADE <- NA
+div_med_results$ADE_Low <- NA
+div_med_results$ADE_High <- NA
+div_med_results$ADE_pval <- NA
+
+div_med_results$TE <- NA
+div_med_results$TE_Low <- NA
+div_med_results$TE_High <- NA
+div_med_results$TE_pval <- NA
+
+for (r in 1:nrow(div_med_results)) {
+  out_r <- paste0("delta_",as.character(div_med_results$Outcome[r]))
+  med_r <- paste0("delta_",as.character(div_med_results$Mediator[r]))
+  
+  all_med_data_r <- delta_div_med_data[,c("PID","deltaTreatment",med_r,out_r)]
+  
+  colnames(all_med_data_r) <- c("PID","deltaTreatment","Med","Out")
+  
+  med_data_finite_r <- all_med_data_r[which(!is.na(all_med_data_r$deltaTreatment) & !is.na(all_med_data_r$Med) & !is.na(all_med_data_r$Out)),]
+  
+  model.M_r <- lm(Med ~ deltaTreatment, med_data_finite_r)
+  
+  model.Y_r <- lm(Out ~ deltaTreatment + Med, med_data_finite_r)
+  
+  set.seed(8918293)
+  mediation_results_r <- mediate(model.M_r, model.Y_r, treat='deltaTreatment', mediator='Med',
+                                 boot=TRUE, sims=500)
+  sum_r <- summary(mediation_results_r)
+  
+  
+  div_med_results$ACME[r] <- sum_r[["d1"]]
+  div_med_results$ACME_Low[r] <- sum_r[["d0.ci"]][["2.5%"]]
+  div_med_results$ACME_High[r] <- sum_r[["d0.ci"]][["97.5%"]]
+  div_med_results$ACME_pval[r] <- sum_r[["d1.p"]]
+  
+  div_med_results$ADE[r] <- sum_r[["z1"]]
+  div_med_results$ADE_Low[r] <- sum_r[["z0.ci"]][["2.5%"]]
+  div_med_results$ADE_High[r] <- sum_r[["z0.ci"]][["97.5%"]]
+  div_med_results$ADE_pval[r] <- sum_r[["z1.p"]]
+  
+  div_med_results$TE[r] <- sum_r[["tau.coef"]]
+  div_med_results$TE_Low[r] <- sum_r[["tau.ci"]][["2.5%"]]
+  div_med_results$TE_High[r] <- sum_r[["tau.ci"]][["97.5%"]]
+  div_med_results$TE_pval[r] <- sum_r[["tau.p"]]
+  
+}
+
+div_med_select <- as.character(div_med_results$Mediator[which(div_med_results$ACME_pval<0.05)])
+div_out_select <- as.character(div_med_results$Outcome[which(div_med_results$ACME_pval<0.05)])
+div_all_med_data_select <- delta_div_med_data[,c("PID","deltaTreatment",paste0("delta_",div_med_select),paste0("delta_",div_out_select))]
+
+colnames(div_all_med_data_select) <- c("PID","deltaTreatment","Med","Out")
+
+div_med_data_finite_select <- div_all_med_data_select[which(!is.na(div_all_med_data_select$deltaTreatment) & !is.na(div_all_med_data_select$Med) & !is.na(div_all_med_data_select$Out)),]
+
+div_model_m_select <- lm(Med~deltaTreatment, div_med_data_finite_select)
+div_sum_m_select <- summary(div_model_m_select)
+div_coef_m_select <- as.data.frame(div_sum_m_select$coefficients)
+
+
+div_m_coef <- coefficients(div_model_m_select)[2]
+
+div_m_ast <- add_asterisks(div_coef_m_select$`Pr(>|t|)`)[2]
+
+
+div_model_my_select <- lm(Out~Med, div_med_data_finite_select)
+div_sum_my_select <- summary(div_model_my_select)
+div_coef_my_select <- as.data.frame(div_sum_my_select$coefficients)
+
+
+div_my_coef <- coefficients(div_model_my_select)[2]
+
+div_my_ast <- add_asterisks(div_coef_my_select$`Pr(>|t|)`)[2]
+
+
+div_model_0_select <- lm(Out~deltaTreatment, div_med_data_finite_select)
+div_sum_0_select <- summary(div_model_0_select)
+div_coef_0_select <- as.data.frame(div_sum_0_select$coefficients)
+
+
+div_0_coef <- coefficients(div_model_0_select)[2]
+
+div_0_ast <- add_asterisks(div_coef_0_select$`Pr(>|t|)`)[2]
+
+
+div_model_y_select <- lm(Out~deltaTreatment+Med, div_med_data_finite_select)
+div_sum_y_select <- summary(div_model_y_select)
+div_coef_y_select <- as.data.frame(div_sum_y_select$coefficients)
+
+
+div_y_coef <- coefficients(div_model_y_select)[2]
+
+div_y_ast <- add_asterisks(div_coef_y_select$`Pr(>|t|)`)[2]
+
+
+print(paste0("Label Predictor to Mediator:",round(div_m_coef,2),"(",div_m_ast,")"))
+print(paste0("Label Mediator to Outcome:",paste0(round(div_0_coef,2),div_0_ast,"(",round(div_y_coef,2),div_y_ast,")")))
+print(paste0("Label Predictor to Outcome:",paste0(round(div_my_coef,2),div_my_ast)))
+
 
 ```
 

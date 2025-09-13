@@ -30,6 +30,32 @@ FIGS1D <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS1D.RDS
 FIGS2A <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS2A.RDS")
 FIGS2B <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS2B.RDS")
 FIGS2C <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS2C.RDS")
+FIGS2D <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS2D.RDS")
+
+#Figure 2
+FIG2A <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2A.RDS")
+FIG2B <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2B.RDS")
+FIG2C <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2C.RDS")
+FIG2D <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2D.RDS")
+FIG2E <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2E.RDS")
+FIG2F <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2F.RDS")
+
+#Figure S3
+FIGS3A <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS3A.RDS")
+FIGS3B <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS3B.RDS")
+FIGS3C <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS3C.RDS")
+FIGS3D <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS3D.RDS")
+FIGS3E <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS3E.RDS")
+FIGS3F <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS3F.RDS")
+
+#Figure S4
+FIGS4A <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS4A.RDS")
+FIGS4B <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS4B.RDS")
+FIGS4C <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS4C.RDS")
+FIGS4D <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS4D.RDS")
+FIGS4E <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS4E.RDS")
+FIGS4F <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS4F.RDS")
+FIGS4G <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS4G.RDS")
 
 ```
 
@@ -59,9 +85,51 @@ saveRDS(FigS1, file = "../../Figures/Finals/FigS1.RDS")
 ```{r}
 #Changes in IL6 in the naive group (FIg S2A) as well as Results of linear mixed effects models relating inflammation to cardiometabolic outcomes in all participants (Fig S2B) and naive participants (Sig S2C)
 
-FigS2BC <- ggarrange(FIGS2B, FIGS2C, common.legend = TRUE, legend="bottom")
+FigS2BC <- ggarrange(FIGS2B, FIGS2C, common.legend = TRUE, legend="right")
 
-FigS2 <- ggarrange(FIGS2A, FigS2BC, widths=c(1,2.5))
+FigS2BCD <- ggarrange(FigS2BC, FIGS2D, nrow=2, heights=c(1.6,1)) 
+
+FigS2 <- ggarrange(FIGS2A, FigS2BCD,widths=c(1,2.5))
+
+
+```
+
+###Figure 2
+```{r}
+Fig2AB <- ggarrange(FIG2A,FIG2B, nrow=2, heights=c(2,1))
+
+Fig2CDE <- ggarrange(FIG2C,FIG2D,FIG2E, nrow=3, heights=c(1,2,1.5))
+
+Fig2 <- ggarrange(Fig2AB,Fig2CDE,FIG2F, widths=c(1,2,1), nrow=1, ncol=3)
+
+
+```
+
+###Figure S3
+```{r}
+
+
+FigS3CDEF <- ggarrange(FIGS3C,FIGS3E,FIGS3D,FIGS3F, nrow=2, ncol=2, common.legend=TRUE, legend="bottom")
+
+FigS3 <- ggarrange(FIGS3A, FIGS3B, FigS3CDEF, nrow=1, widths=c(1,1.5,2.5))
+
+```
+
+###Figure S4
+```{r}
+
+
+FigS4BD <- ggarrange(FIGS4B, FIGS4D, nrow=2, common.legend=TRUE, legend="right")
+
+FigS4CE <- ggarrange(FIGS4C, FIGS4E, nrow=2, common.legend=TRUE, legend="right")
+
+FigS4BCDE <-ggarrange(FigS4BD, FigS4CE, nrow=1, widths=c(1.3,1),common.legend=TRUE, legend="none")
+
+FigS45FG <- ggarrange(FIGS4F, FIGS4G, nrow=2, common.legend=TRUE, legend="bottom", legend.grob=get_legend(FIGS4A))
+
+FigS4BCDEFG <- ggarrange(FigS4BCDE, FigS45FG, nrow=1, widths=c(2,1))
+
+FigS4 <- ggarrange(FIGS4A,FigS4BCDEFG, nrow=1, widths = c(1.7,6))
 
 
 ```
