@@ -577,13 +577,49 @@ imm_vars <- c("CD14_Classical_Monocytes_Percent", #CD14+ Classical mMnocytes
 
 # Statistics are performed on cohorts at different time points
 
-inf_stats_co <- gp_stat_sum(data=met_lmer_data,            #Data set specified
+imm_stats_co <- gp_stat_sum(data=met_lmer_data,            #Data set specified
                             sub_vars="DisplayWeek",      #Subset variable for stratification is selected
                             dep_vars=imm_vars,    #Dependent variables are the imm_vars previously defined
                             gp_var="Cohort",      #Group variable is cohort
                             normality= FALSE,     #Data has not been normalized so we are doing nonparametric tests
                             adj="bonferroni"      #p-value adjustment method is Bonferroni
                             )  
+
+imm_cells_diff <- "CD14_Intermediate_Monocytes_Percent"
+
+imm_stats_sig <- imm_stats_co[which(imm_stats_co$Measure %in% imm_cells_diff),]
+
+met_lmer_data_imm_long <- pivot_longer(met_lmer_data,
+                                       cols=imm_cells_diff,
+                                       values_to="Amount",
+                                       names_to="Measure"
+                                       )
+
+
+boxplot_imm <- ggplot(data = met_lmer_data_imm_long,
+                      mapping = aes(x = Cohort, y = Amount)) +
+                      geom_boxplot(aes(x = Cohort, y = Amount, fill=Cohort), 
+                                   outliers = FALSE) +
+                      geom_jitter(aes(x = Cohort, y = Amount)) +
+                      scale_y_log10()+
+                      labs(y="Measures", tag="C", fill="Cohort")+
+                      theme_classic() +
+                      theme(legend.position = "right",
+                            legend.title = element_text(size = 20),
+                            legend.text = element_text(size = 20),
+                            axis.text.x = element_text(size = 15, hjust=1, angle=45),
+                            axis.title.y = element_text(size = 20),
+                            axis.title.x = element_blank(),
+                            axis.text.y = element_text(size = 15),
+                            strip.text.x = element_text(size=15),
+                            strip.text.y = element_text(size=10),
+                            plot.tag = element_text(size=25),
+                            ggh4x.facet.nestline = element_blank(),
+                            strip.background.x = element_rect(color="black", fill="gray", linetype="solid"),
+                            strip.background.y = element_rect(color="black", fill="gray", linetype="solid")) +
+                      facet_nested(cols=vars(DisplayWeek),
+                                   rows=vars(Measure),
+                                  scales="free_y") 
 
 ```
 
@@ -724,6 +760,26 @@ imm_base_long_select$DisplayMeasure[which(imm_base_long_select$DisplayMeasure=="
 
 imm_base_long_select$DisplayWeek <- factor(imm_base_long_select$DisplayWeek, levels=c("0 Weeks", "24 Weeks"))
 
+imm_base_long_select$DisplayMeasure <- factor(imm_base_long_select$DisplayMeasure,
+                                              levels=c("CD4+\nT Cells",
+                                                       "CD8+\nT Cells",
+                                                       "CD8+HLADR+\nCD38+ T Cells",
+                                                       "CD4+CD103+\nT Cells",
+                                                       "CD8+CD103+\nT Cells",
+                                                       "CD4+PD-1+\nT Cells",
+                                                       "CD8+PD-1+\nT Cells",
+                                                       "CD14+\nIntermediate\nMonocytes"))
+
+imm_stats_long_select$DisplayMeasure <- factor(imm_stats_long_select$DisplayMeasur,
+                                               levels=c("CD4+\nT Cells",
+                                                       "CD8+\nT Cells",
+                                                       "CD8+HLADR+\nCD38+ T Cells",
+                                                       "CD4+CD103+\nT Cells",
+                                                       "CD8+CD103+\nT Cells",
+                                                       "CD4+PD-1+\nT Cells",
+                                                       "CD8+PD-1+\nT Cells",
+                                                       "CD14+\nIntermediate\nMonocytes"))
+  
 imm_select_viol <- ggplot(data=imm_base_long_select, aes(x=DisplayWeek, y=Total, fill=DisplayWeek))+
   geom_violin() +
   geom_line(mapping = aes(group = PID),
@@ -1487,6 +1543,33 @@ imm_pc_plot_naive <- ggplot(imm_pc_lm_data_naive, aes(x = Predictor, y = Display
         title = element_text(size=20),
         plot.tag = element_text(size=25))
 
+#PC2 and HDL-C
+
+HDL_PC2_Plot <- ggplot(data = ord_imm_data_met_naive, size=2, alpha=.5, aes(x = as.numeric(ord_imm_data_met_naive$PC2), y = as.numeric(ord_imm_data_met_naive$HDL))) + 
+  geom_point(data=ord_imm_data_met_naive,aes(fill=Cohort_Week, color = Cohort_Week),shape=21, size=3, stroke=1, alpha=0.5)+
+  geom_smooth(method="lm", se=TRUE)+
+  scale_color_identity()+
+  geom_line(size=.5, alpha=.3, aes(group=ord_imm_data_met_naive$PID))+
+#             scale_color_manual(values=c("#A6611A","gray","#018571"), name="Cohort")+
+                scale_fill_manual(values=c("#A6611A","#A6611A","gray","gray","#018571","#018571"), name="Cohort")+
+                scale_color_manual(values=c("#A6611A","black","gray","black","#018571","black"), name="Cohort")+  
+  labs(x="PC2", y="HDL-C (mg/dL)", key=" ", tag="G")+
+  guides(color=guide_legend(nrow=1,bycol=TRUE))+
+  theme_bw()+
+  theme(title=element_text(size=15),
+        axis.text.y=element_text(size=15),
+        axis.text.x=element_text(size=15),
+        strip.text.y = element_text(size=15),
+        strip.text.x = element_text(size=15),
+        axis.title = element_text(size=15),
+        axis.title.y.right = element_text(size = 15),
+        legend.text=element_text(size=15),
+        plot.tag = element_text(size=25),
+        legend.title=element_blank(),
+        legend.position = "none")
+
+
+
 
 ```
 
@@ -1501,6 +1584,7 @@ saveRDS(mono_med_dag, file = "../../Figures/Panels/FIG2C.RDS")
 saveRDS(imm_pcoaplot_biplot, file = "../../Figures/Panels/FIG2D.RDS")
 saveRDS(imm_pcoaplot_strat, file = "../../Figures/Panels/FIG2E.RDS")
 saveRDS(imm_pc_plot_naive, file = "../../Figures/Panels/FIG2F.RDS")
+saveRDS(HDL_PC2_Plot, file = "../../Figures/Panels/FIG2G.RDS")
 
 
 

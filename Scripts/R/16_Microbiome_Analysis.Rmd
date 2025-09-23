@@ -510,6 +510,34 @@ div_shannon_plot <- ggplot(div_shannon_lm_data, aes(x = Predictor, y = DisplayOu
 ```
 
 
+###Scatter
+```{r}
+
+met_lmer_data$Cohort_Week <- paste0(met_lmer_data$Cohort," - ",met_lmer_data$Week," Weeks")
+
+Faith_HDL_Plot <- ggplot(data = met_lmer_data, size=2, alpha=.5, aes(x = as.numeric(met_lmer_data$Faith_Diversity), y = as.numeric(met_lmer_data$HDL))) + 
+  geom_point(data=met_lmer_data,aes(fill=Cohort_Week, color = Cohort_Week),shape=21, size=3, stroke=1, alpha=0.5)+
+  geom_smooth(method="lm", se=TRUE)+
+  scale_color_identity()+
+  geom_line(size=.5, alpha=.3, aes(group=met_lmer_data$PID))+
+#             scale_color_manual(values=c("#A6611A","gray","#018571"), name="Cohort")+
+                scale_fill_manual(values=c("#A6611A","#A6611A","gray","gray","#018571","#018571"), name="Cohort")+
+                scale_color_manual(values=c("#A6611A","black","gray","black","#018571","black"), name="Cohort")+  
+  labs(x="Faith Diversity", y="HDL-C (mg/dL)", key=" ", tag="D")+
+  guides(color=guide_legend(nrow=1,bycol=TRUE))+
+  theme_bw()+
+  theme(title=element_text(size=15),
+        axis.text.y=element_text(size=15),
+        axis.text.x=element_text(size=15),
+        strip.text.y = element_text(size=15),
+        strip.text.x = element_text(size=15),
+        axis.title = element_text(size=15),
+        axis.title.y.right = element_text(size = 15),
+        legend.text=element_text(size=15),
+        plot.tag = element_text(size=25),
+        legend.title=element_blank(),
+        legend.position = "right")
+```
 
 
 #### Linear Mixed Effects Models  - All Participants
@@ -750,6 +778,8 @@ div_shannon_plot_naive <- ggplot(div_shannon_lm_naive_data, aes(x = Predictor, y
         title = element_text(size=15),
         plot.tag = element_text(size=25))
 
+
+
 ```
 
 
@@ -763,9 +793,8 @@ div_shannon_plot_naive <- ggplot(div_shannon_lm_naive_data, aes(x = Predictor, y
 saveRDS(alpha_boxplot, file = "../../Figures/Panels/FIGS3A.RDS")
 saveRDS(div_viol, file = "../../Figures/Panels/FIGS3B.RDS")
 saveRDS(div_faith_plot, file = "../../Figures/Panels/FIGS3C.RDS")
-saveRDS(div_shannon_plot, file = "../../Figures/Panels/FIGS3D.RDS")
-saveRDS(div_faith_plot_naive, file = "../../Figures/Panels/FIGS3E.RDS")
-saveRDS(div_shannon_plot_naive, file = "../../Figures/Panels/FIGS3F.RDS")
+saveRDS(Faith_HDL_Plot, file = "../../Figures/Panels/FIGS3D.RDS")
+
 
 
 
@@ -782,22 +811,29 @@ saveRDS(div_shannon_plot_naive, file = "../../Figures/Panels/FIGS3F.RDS")
 #We pull the genus variables
 gen_names_ind <- colnames(base_with_16S)[315:ncol(base_with_16S)]
 
-#Now we create a data frame to pull median abudnances
+#Now we create a data frame to pull median abundances
 gen_names_ind_meds <- as.data.frame(gen_names_ind)
+#We name the column Genus
 colnames(gen_names_ind_meds) <- "Genus"
-
+#We generate a median abundance field
 gen_names_ind_meds$Median <- NA
 
+#We go through each genus and pull its median in the data set
 for (i in 1:nrow(gen_names_ind_meds)) {
+  #The ith genus is extracted
   gen_i <- gen_names_ind_meds$Genus[i]
+  #The median is caulated
   gen_names_ind_meds$Median[i] <- median(unlist(base_with_16S[,gen_i]), na.rm=TRUE)
 }
 
+#Now we ortder it in decending order
 gen_names_ind_meds <- gen_names_ind_meds %>%
   arrange(desc(Median))
 
+#We select the top 50
 gen_names_top_50 <- gen_names_ind_meds$Genus[1:50]               
 
+#Now we generate the cross sectional statistics across cohort at each timepoint using the gp_stat_sum function
 
 fecal.gen_cs_stats <- gp_stat_sum(data=base_with_16S,               #Data set specified
                                   sub_vars="Week",      #Subset variable for stratification is selected
@@ -814,20 +850,22 @@ fecal.gen_cs_stats <- gp_stat_sum(data=base_with_16S,               #Data set sp
 ####Longtudinal Statistics
 ```{r}
 
+#We use the long_stat_sumn function to see which abundant taxa changes over th study period
+fecal.gen_long_stats <-long_stat_sum(data=base_with_16S, #Data set specified
+                                  sub_vars="Cohort", #Data is stratified by Cohort
+                                  tm_var="Week", #We look at changes by the timepoint variable, Week
+                                  dep_vars=gen_names_top_50, #We only assess differecnes in the top 50 with the highest median
+                                  rand_var="PID", #The patient idneitify is the random effect
+                                  normality=FALSE, #Abundances are not normalized so we wiull perform an nonparametric test
+                                  adj="bonferroni", #bonferroni is the adjustment method
+                                  pw="separate")  #Paired wilxcoxon is used for the pairwise comparisons    
 
-fecal.gen_long_stats <-long_stat_sum(data=base_with_16S, 
-                                  sub_vars="Cohort", 
-                                  tm_var="Week", 
-                                  dep_vars=gen_names_top_50, 
-                                  rand_var="PID", 
-                                  normality=FALSE, 
-                                  adj="bonferroni", 
-                                  pw="separate")      
-
+#We pull out the subsets by cohort
 fecal.gen_long_stats_naive <- fecal.gen_long_stats[which(fecal.gen_long_stats$Cohort=="Naïve"),]
 fecal.gen_long_stats_exp <- fecal.gen_long_stats[which(fecal.gen_long_stats$Cohort=="Exp"),]
 fecal.gen_long_stats_hc <- fecal.gen_long_stats[which(fecal.gen_long_stats$Cohort=="HC"),]
 
+#We do adjustments manually again by cohort
 fecal.gen_long_stats_naive$padj <- p.adjust(fecal.gen_long_stats_naive$`p-value`, method="fdr")
 fecal.gen_long_stats_exp$padj <- p.adjust(fecal.gen_long_stats_exp$`p-value`, method="fdr")
 fecal.gen_long_stats_hc$padj <- p.adjust(fecal.gen_long_stats_hc$`p-value`, method="fdr")
@@ -1109,39 +1147,45 @@ saveRDS(mic_16S_plot, file = "../../Figures/Panels/FIGS4A.RDS")
 
 ```{r}
 
+#We pull out the PC vectors from the fecal.wu.biplot object
 fecal.WU.pc.data <- inner_join(fecal.wu.biplot[["data"]][["Vectors"]],base, by="SampleID")
 
 
-PCvector_WU <- paste0("PC",1:231)
-PCvector_squared_WU <- paste0(PCvector_WU,"^2")
-PCvector_squared_combined_WU <- paste0(PCvector_squared_WU, collapse=" + ")
-
-
-
+#We now pull the contribution of each species
 fecal.WU.contrib <-fecal.wu.biplot[["data"]][["Species"]]
 
+#We generate euclideans for the PC1 PC2 space
 fecal.features_12_WU <- fecal.WU.contrib %>%
   rowwise() %>%
   mutate(contribution12 = sqrt(PC1^2 + PC2^2), ) %>%
   arrange(desc(contribution12))
 
+#We generate euclideans for the PC3 PC4 space
 fecal.features_34_WU <- fecal.WU.contrib %>%
   rowwise() %>%
   mutate(contribution34 = sqrt(PC3^2 + PC4^2), ) %>%
   arrange(desc(contribution34))
 
+#We need to manually fill in the genuera and family names but first we just call all unclassified
+
 fecal.features_12_WU$Family <- "Unclassified" 
 fecal.features_12_WU$Genus <- "Unclassified"
-
 fecal.features_34_WU$Family <- "Unclassified" 
 fecal.features_34_WU$Genus <- "Unclassified"
 
+#We pull the taxta classification
 fecal.tax <- as.data.frame(fecal.tax.plot.data@tax_table)
 
+#Now we go through each and manually classify
 for (k in 1:nrow(fecal.features_12_WU)) {
+  #First for th 12 data set
+  
+  #feature IL id pulled
   feat.k_12 <- fecal.features_12_WU$FeatureID[k]
+  #Genus and family names from that feature are pulled
   fecal.gen.k_12 <- fecal.tax$Genus[which(rownames(fecal.tax)==feat.k_12)]
   fecal.fam.k_12 <- fecal.tax$Family[which(rownames(fecal.tax)==feat.k_12)]
+  #If it is they are nonnull values they are entered
   if (length(fecal.gen.k_12)==1) { 
     if (!is.na(fecal.gen.k_12)) {
      fecal.features_12_WU$Genus[k] <- fecal.gen.k_12  
@@ -1153,10 +1197,14 @@ for (k in 1:nrow(fecal.features_12_WU)) {
     }
   }
   
+  #Second for the 34 data set (same number of rows so both inlcuded in same for loop)
   
+  #feature IL id pulled
   feat.k_34 <- fecal.features_34_WU$FeatureID[k]
+  #Genus and family names from that feature are pulled
   fecal.gen.k_34 <- fecal.tax$Genus[which(rownames(fecal.tax)==feat.k_34)]
   fecal.fam.k_34 <- fecal.tax$Family[which(rownames(fecal.tax)==feat.k_34)]
+  #If it is they are nonnull values they are entered
   if (length(fecal.gen.k_34)==1) { 
     if (!is.na(fecal.gen.k_34)) {
      fecal.features_34_WU$Genus[k] <- fecal.gen.k_34  
@@ -1170,14 +1218,16 @@ for (k in 1:nrow(fecal.features_12_WU)) {
   
 }
 
+#We manually filter by arbitrary cutoffs to get the top ten
 fecal.top_ten_12_WU <- fecal.features_12_WU[which(fecal.features_12_WU$contribution12>0.017),]
-
 fecal.top_ten_34_WU <- fecal.features_34_WU[which(fecal.features_34_WU$contribution34>0.0277),]
 
-
+#We sep generate a cohort week combination field for the plot
 fecal.WU.pc.data$Cohort_Week <- paste0(fecal.WU.pc.data$Cohort," - ", fecal.WU.pc.data$Week, " Weeks")
+#We generate a display week field for the plot
 fecal.WU.pc.data$DisplayWeek <- paste0(fecal.WU.pc.data$Week, " Weeks")
 
+#The biplot cooridnates for the 12 feature arrows 
 fecal.mic_arrows_12_WU <- data.frame(
   xstart = rep(0,10),  # Replace with your actual x-coordinate start points
   ystart = rep(0,10),  # Replace with your actual y-coordinate start points
@@ -1185,7 +1235,7 @@ fecal.mic_arrows_12_WU <- data.frame(
   yend = (8)*fecal.top_ten_12_WU$PC2,  # Replace with your actual y-coordinate end points
   label=fecal.top_ten_12_WU$Genus
 )
-
+#The biplot cooridnates for the 34 feature arrows
 fecal.mic_arrows_34_WU <- data.frame(
   xstart = rep(0,10),  # Replace with your actual x-coordinate start points
   ystart = rep(0,10),  # Replace with your actual y-coordinate start points
@@ -1195,8 +1245,7 @@ fecal.mic_arrows_34_WU <- data.frame(
 )
 
 
-
-
+#One plot with just samples colored by cohort and week with elipses in 12 space
 fecal.mic_pcoaplot_biplot_12_samples <- ggplot(data = fecal.WU.pc.data, size=2, alpha=.5, aes(x = as.numeric(fecal.WU.pc.data$PC1), y = as.numeric(fecal.WU.pc.data$PC2))) + 
   geom_point(data=fecal.WU.pc.data,aes(fill=fecal.WU.pc.data$Cohort_Week, color=fecal.WU.pc.data$Cohort_Week), shape=21, size=3, stroke=1, alpha=0.5)+
   geom_line(size=.5, alpha=.3, aes(group= fecal.WU.pc.data$PID))+
@@ -1221,10 +1270,12 @@ fecal.mic_pcoaplot_biplot_12_samples <- ggplot(data = fecal.WU.pc.data, size=2, 
         legend.position = "right")
 
 
+#We pull the x and y limits to use the same scale for the arrow plots
 x_limits_WU_12 <- ggplot_build(fecal.mic_pcoaplot_biplot_12_samples)$layout$panel_params[[1]]$x.range
 y_limits_WU_12 <- ggplot_build(fecal.mic_pcoaplot_biplot_12_samples)$layout$panel_params[[1]]$y.range
 
 
+#The arrow plot with the top ten features in the 12 space
 fecal.mic_pcoaplot_biplot_12_arrows <- ggplot(data = fecal.WU.pc.data, size=2, alpha=.5, aes(x = as.numeric(fecal.WU.pc.data$PC1), y = as.numeric(fecal.WU.pc.data$PC2))) +  
     labs(x="PC1", y="PC2", key=" ", tag="C")+
   geom_segment(data = fecal.mic_arrows_12_WU, aes(x = xstart, y = ystart, xend = xend, yend = yend),arrow = arrow(length = unit(0.3, "cm")), color="red", inherit.aes = FALSE)+
@@ -1246,6 +1297,7 @@ fecal.mic_pcoaplot_biplot_12_arrows <- ggplot(data = fecal.WU.pc.data, size=2, a
         legend.title=element_blank(),
         legend.position = "bottom")
 
+#One plot with just samples colored by cohort and week with elipses in 34 space
 fecal.mic_pcoaplot_biplot_34_samples <- ggplot(data = fecal.WU.pc.data, size=2, alpha=.5, aes(x = as.numeric(fecal.WU.pc.data$PC3), y = as.numeric(fecal.WU.pc.data$PC4))) + 
   geom_point(data=fecal.WU.pc.data,aes(fill=fecal.WU.pc.data$Cohort_Week, color=fecal.WU.pc.data$Cohort_Week), shape=21, size=3, stroke=1, alpha=0.5)+
   geom_line(size=.5, alpha=.3, aes(group= fecal.WU.pc.data$PID))+
@@ -1269,11 +1321,11 @@ fecal.mic_pcoaplot_biplot_34_samples <- ggplot(data = fecal.WU.pc.data, size=2, 
         legend.title=element_blank(),
         legend.position = "right")
 
-
+#We pull the x and y limits to use the same scale for the arrow plots
 x_limits_WU_34 <- ggplot_build(fecal.mic_pcoaplot_biplot_34_samples)$layout$panel_params[[1]]$x.range
 y_limits_WU_34 <- ggplot_build(fecal.mic_pcoaplot_biplot_34_samples)$layout$panel_params[[1]]$y.range
 
-
+#The arrow plot with the top ten features in the 34 space
 fecal.mic_pcoaplot_biplot_34_arrows <- ggplot(data = fecal.WU.pc.data, size=2, alpha=.5, aes(x = as.numeric(fecal.WU.pc.data$PC3), y = as.numeric(fecal.WU.pc.data$PC4))) +  
   labs(x="PC3", y="PC4", key=" ", tag="E")+
   geom_segment(data = fecal.mic_arrows_34_WU, aes(x = xstart, y = ystart, xend = xend, yend = yend),arrow = arrow(length = unit(0.3, "cm")), color="red", inherit.aes = FALSE)+
@@ -1524,10 +1576,10 @@ mic_pc_plot_naive <- ggplot(mic_pc_lm_naive_data, aes(x = Predictor, y = Display
   scale_color_manual(values=c("lightblue","pink","red"))+
   geom_point(size=5) +
   theme_minimal() +
-  labs(x = "Plasma Measure", y = " ", fill=" ", tag="G", title="Naïve Participants") +
+  labs(x = "Plasma Measure", y = " ", fill=" ", tag="F", title="Naïve Participants") +
   theme_classic() +
   guides(color = guide_legend(ncol = 1))+
-  theme(legend.position = "right",
+  theme(legend.position = "bottom",
         legend.title = element_blank(),
         legend.text = element_text(size = 12),
         axis.text.y = element_text(size=12),
@@ -1544,6 +1596,35 @@ mic_pc_plot_naive <- ggplot(mic_pc_lm_naive_data, aes(x = Predictor, y = Display
 
 ```
 
+#####Scatter pLot
+```{r}
+
+
+Trig_PC3_Plot <- ggplot(data = fecal.WU.pc.data_naive, size=2, alpha=.5, aes(x = as.numeric(fecal.WU.pc.data_naive$PC3), y = as.numeric(fecal.WU.pc.data_naive$Trig))) + 
+  geom_point(data=fecal.WU.pc.data_naive,aes(fill=Cohort_Week, color = Cohort_Week),shape=21, size=3, stroke=1, alpha=0.5)+
+  geom_smooth(method="lm", se=TRUE)+
+  scale_color_identity()+
+  geom_line(size=.5, alpha=.3, aes(group=fecal.WU.pc.data_naive$PID))+
+#             scale_color_manual(values=c("#A6611A","gray","#018571"), name="Cohort")+
+                scale_fill_manual(values=c("#A6611A","#A6611A","gray","gray","#018571","#018571"), name="Cohort")+
+                scale_color_manual(values=c("#A6611A","black","gray","black","#018571","black"), name="Cohort")+  
+  labs(x="PC3", y="Triglcyerides (mg/dL)", key=" ", tag="G")+
+  guides(color=guide_legend(nrow=1,bycol=TRUE))+
+  theme_bw()+
+  theme(title=element_text(size=15),
+        axis.text.y=element_text(size=15),
+        axis.text.x=element_text(size=15),
+        strip.text.y = element_text(size=15),
+        strip.text.x = element_text(size=15),
+        axis.title = element_text(size=15),
+        axis.title.y.right = element_text(size = 15),
+        legend.text=element_text(size=15),
+        plot.tag = element_text(size=25),
+        legend.title=element_blank(),
+        legend.position = "none")
+```
+
+
 ####Plot Saving
 ```{r}
 
@@ -1552,7 +1633,7 @@ saveRDS(fecal.mic_pcoaplot_biplot_12_samples, file = "../../Figures/Panels/FIGS4
 saveRDS(fecal.mic_pcoaplot_biplot_12_arrows, file = "../../Figures/Panels/FIGS4C.RDS")
 saveRDS(fecal.mic_pcoaplot_biplot_34_samples, file = "../../Figures/Panels/FIGS4D.RDS")
 saveRDS(fecal.mic_pcoaplot_biplot_34_arrows, file = "../../Figures/Panels/FIGS4E.RDS")
-saveRDS(mic_pc_plot, file = "../../Figures/Panels/FIGS4F.RDS")
-saveRDS(mic_pc_plot_naive, file = "../../Figures/Panels/FIGS4G.RDS")
+saveRDS(mic_pc_plot_naive, file = "../../Figures/Panels/FIGS4F.RDS")
+saveRDS(Trig_PC3_Plot, file = "../../Figures/Panels/FIGS4G.RDS")
 ```
 

@@ -444,10 +444,10 @@ Euk_18S_mdf$SampleID <- Euk_18S_mdf$Sample
 Euk_18S_mdf$PID <- substr(Euk_18S_mdf$Sample,1,6)
 
 all_18S_IDs <- unique(Euk_18S_mdf$Sample)
-Blast_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Blastocystis" & Euk_18S_mdf$Abundance>0.2)]
-Ent_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Entamoeba" & Euk_18S_mdf$Abundance>0.2)]
-Kom_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Komagataella" & Euk_18S_mdf$Abundance>0.2)]
-Str_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Strigeidida" & Euk_18S_mdf$Abundance>0.2)]
+Blast_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Blastocystis" & Euk_18S_mdf$Abundance>0)]
+Ent_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Entamoeba" & Euk_18S_mdf$Abundance>0)]
+Kom_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Komagataella" & Euk_18S_mdf$Abundance>0)]
+Str_IDs <- Euk_18S_mdf$Sample[which(Euk_18S_mdf$Genus=="Strigeidida" & Euk_18S_mdf$Abundance>0)]
 
 Ent_Blast_data <- base
 

@@ -39,6 +39,7 @@ FIG2C <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2C.RDS")
 FIG2D <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2D.RDS")
 FIG2E <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2E.RDS")
 FIG2F <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2F.RDS")
+FIG2G <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG2G.RDS")
 
 #Figure S3
 FIGS3A <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS3A.RDS")
@@ -100,7 +101,9 @@ Fig2AB <- ggarrange(FIG2A,FIG2B, nrow=2, heights=c(2,1))
 
 Fig2CDE <- ggarrange(FIG2C,FIG2D,FIG2E, nrow=3, heights=c(1,2,1.5))
 
-Fig2 <- ggarrange(Fig2AB,Fig2CDE,FIG2F, widths=c(1,2,1), nrow=1, ncol=3)
+Fig2FG <- ggarrange(FIG2F, FIG2G, nrow=2)
+
+Fig2 <- ggarrange(Fig2AB,Fig2CDE,Fig2FG, widths=c(1.5,1.5,1), nrow=1, ncol=3)
 
 
 ```
@@ -109,9 +112,9 @@ Fig2 <- ggarrange(Fig2AB,Fig2CDE,FIG2F, widths=c(1,2,1), nrow=1, ncol=3)
 ```{r}
 
 
-FigS3CDEF <- ggarrange(FIGS3C,FIGS3E,FIGS3D,FIGS3F, nrow=2, ncol=2, common.legend=TRUE, legend="bottom")
+FigS3CD <- ggarrange(FIGS3C,FIGS3D, nrow=2)
 
-FigS3 <- ggarrange(FIGS3A, FIGS3B, FigS3CDEF, nrow=1, widths=c(1,1.5,2.5))
+FigS3 <- ggarrange(FIGS3A, FIGS3B, FigS3CD, nrow=1, widths=c(1,1.5,1))
 
 ```
 
@@ -125,7 +128,7 @@ FigS4CE <- ggarrange(FIGS4C, FIGS4E, nrow=2, common.legend=TRUE, legend="right")
 
 FigS4BCDE <-ggarrange(FigS4BD, FigS4CE, nrow=1, widths=c(1.3,1),common.legend=TRUE, legend="none")
 
-FigS45FG <- ggarrange(FIGS4F, FIGS4G, nrow=2, common.legend=TRUE, legend="bottom", legend.grob=get_legend(FIGS4A))
+FigS45FG <- ggarrange(FIGS4F, FIGS4G, nrow=2)
 
 FigS4BCDEFG <- ggarrange(FigS4BCDE, FigS45FG, nrow=1, widths=c(2,1))
 

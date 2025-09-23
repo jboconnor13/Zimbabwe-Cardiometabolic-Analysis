@@ -66,6 +66,9 @@ library(tidyr)
 library(vegan)
 library(utils)
 library(r2glmm)
+library(tidyverse)
+library(ggraph)
+library(tidygraph)
 
 message("Libraries Loaded complete!")
 

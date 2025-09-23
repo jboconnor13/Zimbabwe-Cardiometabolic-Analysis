@@ -70,6 +70,13 @@ mic_16S_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/mic_
 
 #18S Data is Loade
 euk_18S_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/euk_18S_objects.RDS")
+  #base: all processed metadata
+  #Euk_18S_mdf: 18S mdf data frmae
+  #base_with_18S: metadata with with 18S added
+  #Zim_all_sg_genera_pre: Unfiltered shotgun taxonomic data
+  #fecal.tax.plot.data: 16S phyloseq object 
+  #base_with_sg_fun: metadata file with sg functional KOs in TPM 
+base_with_18S  <- euk_18S_objects$base_with_18S
 
 ```
 
@@ -78,17 +85,400 @@ euk_18S_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/euk_
 ```{r pressure, echo=FALSE}
 
 #We pull Baseline Data
-delta_base <- met_lmer_data[which(met_lmer_data$DisplayWeek=="0 Weeks"),c("PID","Cohort","HIV_Status")]
+delta_base <- met_lmer_data[which(met_lmer_data$DisplayWeek=="0 Weeks"),c("PID","Cohort","HIV_Status", "Visit_Age","Location","Gender")]
 
 #delta_treatment added 
-delta_base$deltaTreatment <- NA
-delta_base$deltaTreatment[which(delta_base$Cohort=="Naïve")] <- 1
-delta_base$deltaTreatment[which(delta_base$Cohort!="Naïve")] <- 0
+delta_base$delta_Treatment <- NA
+delta_base$delta_Treatment[which(delta_base$Cohort=="Naïve")] <- 1
+delta_base$delta_Treatment[which(delta_base$Cohort!="Naïve")] <- 0
 
 #We specify the variables that changed
 diff_vars <- c("HDL",
+               "LDL",
                "Trig",
-               "Glucose")
+               "Glucose",
+               "BMI",
+               "Total_Dairy",
+               "Total_Fruit",
+               "Total_Veg" ,
+               "Total_Protein",
+               "Total_Grain",
+               "Total_Fast_Food",
+               "Total_Drinks",
+               "Total_Snacks")
+
+
+for (c in 1:length(diff_vars)) {
+  var_c <- diff_vars[c]
+  delta_base$V <- NA
+  
+  for (r in 1:nrow(delta_base)) {
+    pid_r <- delta_base$PID[r]
+    row_0 <- which(met_lmer_data$PID==pid_r & met_lmer_data$DisplayWeek=="0 Weeks")
+    row_24 <- which(met_lmer_data$PID==pid_r & met_lmer_data$DisplayWeek=="24 Weeks")
+    if (length(row_0)==1 & length(row_24)==1) {
+      delta_base$V[r] <- as.numeric(met_lmer_data[row_24,var_c]) - as.numeric(met_lmer_data[row_0,var_c])
+    }
+  }
+  colnames(delta_base)[ncol(delta_base)] <- paste0("delta_",var_c)
+  
+}
+
+```
+
+###Outcome Confounders
+```{r}
+
+
+delta_confs <-c("HIV_Status","Visit_Age","Location","Gender", "delta_Treatment","delta_Total_Dairy","delta_Total_Fruit","delta_Total_Veg","delta_Total_Protein","delta_Total_Grain","delta_Total_Fast_Food","delta_Total_Drinks","delta_Total_Snacks")
+
+delta_met_vars <- c("delta_HDL","delta_LDL","delta_Trig","delta_Glucose")
+
+#We generate an linear mixed effects model data set with combinations of predtictors (confounders) and outomes (metabolic variables)
+delta_data_bw <- unique(expand.grid(delta_confs, delta_met_vars))
+
+#We name the columns accordingly
+colnames(delta_data_bw) <- c("Predictor","Outcome")
+
+#We generate fields for the statistics
+delta_data_bw["pval"] <- NA #p-values for each predictor in the model of that metabolic outcome using a t-test
+delta_data_bw["padj"] <- NA #FDR adjusted p-values across predictors
+delta_data_bw["coef"] <- NA #coefficients for each predictor in the model of that metabolic outcome
+delta_data_bw["sig"] <- NA #A significance field for the plot (ext showing if positive or negative and significant or not)
+delta_data_bw["percent_variance_exp_original"] <- NA #Calucltaed percent variance explained
+delta_data_bw["percent_variance_exp_bw"] <- NA #Calucltaed percent variance explained
+
+#Now we go through each response and perform the backward selection
+for (response in delta_met_vars){ 
+  
+  #We remove NA values 
+  response_bw_data <- na.omit(delta_base[,c(delta_confs,response,"PID")])
+  
+  #The full formala is created including all counfounders
+  ff_full <- as.formula(paste0(response,"~",paste0(delta_confs, collapse="+"))) 
+  fm_full <- lm(ff_full,
+                data = response_bw_data)
+  
+  #Predicted values are generated for pve calulations
+  predict_fm <- predict(fm_full)
+  sum_fm <- summary(fm_full)
+  
+  #Below we calculate the R -suared value
+  #First total sum of squares
+  tss <- sum((unlist(na.omit(response_bw_data[,c(response)]))-mean(unlist(na.omit(response_bw_data[,c(response)]))))^2)
+  #Second residual sum of squares
+  rss <- sum((unlist(response_bw_data[,c(response)])-predict_fm)^2)
+  #R-squared
+  r_squared <- 1-(rss/tss)
+  #Percent variance explained
+  pve <- r_squared*100
+  class(pve) <- "numeric"
+  
+  #We input the percent variance explained into the data set
+  delta_data_bw$percent_variance_exp_original[which(delta_data_bw$Outcome==response)] <- pve
+  
+  
+  ## stepwise regression, direction = "backward"
+  bwd <- step(fm_full, 
+              trace = 1, 
+              direction = "backward")
+  
+  
+  bwd_coefs <- as.data.frame(bwd$coefficients)
+  
+  bwd_selected <- c()
+  
+  #Now we combined all variables that were selected
+  for (var in delta_confs) {
+    if (var %in% substr(rownames(bwd_coefs),1,nchar(var))) {
+      bwd_selected <- c(bwd_selected, var)
+    }
+  }
+  
+  sum_fm_bw <- summary(bwd)
+  #The predicted values are generated
+  predict_fm_bw <- predict(bwd)
+  
+  #Below we calculate the R -suared value
+  #Second residual sum of squares
+  rss_bw <- sum((na.omit(response_bw_data[,c(response)])-predict_fm_bw)^2)
+  #R-squared
+  r_squared_bw <- 1-(rss_bw/tss)
+  #Percent variance explained
+  pve_bw <- r_squared_bw*100
+  
+  #We generate fields for the statistics
+  class(pve_bw) <- "numeric"
+  
+  #We input the percent variance explained into the data set
+  delta_data_bw$percent_variance_exp_bw[which(delta_data_bw$Outcome==response)] <- pve_bw
+  
+  #We pull out the coefficinets
+  coef_fm_bw <- as.data.frame(sum_fm_bw$coefficients)
+  
+  #We adjust the p-values
+  coef_fm_bw$padj <- p.adjust(coef_fm_bw$`Pr(>|t|)`, method="fdr")
+  
+  assign(paste0(response, "_confs"),setdiff(rownames(coef_fm_bw)[which(coef_fm_bw$`Pr(>|t|)`<0.05)],"(Intercept)"))
+  
+  #Now we go through each predictor and pull out the coefficient in p-value 
+  for (pred in delta_confs) {
+    #We pull the row in the coefficient data set (use substr because sometime strings are added)
+    coef_row <- which(substr(rownames(coef_fm_bw),1,nchar(pred))==pred)
+    #We not pull the row from the lm data set to put it in
+    stat_row <- which(as.character(delta_data_bw$Predictor)==pred & as.character(delta_data_bw$Outcome)==response)
+    #We add an if statemenbt to make sure we only add values when its ad 
+    
+    if (length(coef_row)==1 & length(stat_row)==1) {
+      #We pull out the p-value (and adjusted p-value)
+      delta_data_bw$pval[stat_row] <- coef_fm_bw$`Pr(>|t|)`[coef_row]
+      delta_data_bw$padj[stat_row] <- coef_fm_bw$padj[coef_row]
+      #We pull out the coefficient
+      delta_data_bw$coef[stat_row] <- coef_fm_bw$Estimate[coef_row]
+      
+      #Based on the direction we indicate if it is positive of negative
+      if (delta_data_bw$coef[stat_row]>0) {
+        delta_data_bw$sig[stat_row] <- "Positive"
+      } 
+      if (delta_data_bw$coef[stat_row]<0) {
+        delta_data_bw$sig[stat_row] <- "Negative"
+      } 
+      #If the p-value is below 0.05 we add a significance label 
+      if (delta_data_bw$pval[stat_row]<0.05) {
+        delta_data_bw$sig[stat_row] <- paste0(delta_data_bw$sig[stat_row], " (Significant)")
+      }
+      
+      
+      
+    }
+  }
+  
+}
+
+
+
+
+#Backward Selection
+
+#We filter to only include selected variables
+delta_data_bw_selected <- delta_data_bw[which(!is.na(delta_data_bw$coef)),]
+
+delta_plot_bw <- ggplot(delta_data_bw_selected, aes(x = Predictor, y = Outcome, color=sig)) +
+  scale_color_manual(values=c("lightblue","blue","pink","red"))+
+  geom_point(size=5) +
+  theme_minimal() +
+  labs(x = "Plasma Measure", y = " ", fill=" ", tag="A", title="Backward Selection") +
+  theme_classic() +
+  guides(color = guide_legend(ncol = 2))+
+  theme(legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12),
+        axis.text.y = element_text(size=12),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12, angle=45, hjust=1),
+        strip.text.x = element_text(size=15),
+        strip.text.y = element_text(size=15),
+        title = element_text(size=20),
+        plot.tag = element_text(size=25))
+
+
+
+```
+
+#Mediator Confounders
+```{r}
+
+
+delta_med_confs <-c("HIV_Status","Visit_Age","Location","Gender", "delta_Total_Dairy","delta_Total_Fruit","delta_Total_Veg","delta_Total_Protein","delta_Total_Grain","delta_Total_Fast_Food","delta_Total_Drinks","delta_Total_Snacks")
+
+inf_diff_vars <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/delta_inf_vars.RDS")
+imm_diff_vars <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/delta_imm_vars.RDS")
+div_diff_vars <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/delta_div_vars.RDS")
+blast_diff_vars <- "Blastocystis"
+
+
+delta_med_met_vars <- c(inf_diff_vars, imm_diff_vars, div_diff_vars, blast_diff_vars)
+
+delta_med_data <- delta_base
+base_with_18S$Blastocystis<-factor(base_with_18S$Blastocystis, levels=c("No","Yes"))
+
+for (c in 1:length(delta_med_met_vars)) {
+  var_c <- delta_med_met_vars[c]
+  
+  if (var_c == "Blastocystis") {
+    data_v <- base_with_18S
+  } else {
+    data_v <- met_lmer_data
+  }
+  data_v$DisplayWeek<-paste0(data_v$Week, " Weeks")
+  delta_med_data$V <- NA
+  
+  for (r in 1:nrow(delta_med_data)) {
+    pid_r <- delta_med_data$PID[r]
+    row_0 <- which(data_v$PID==pid_r & data_v$DisplayWeek=="0 Weeks")
+    row_24 <- which(data_v$PID==pid_r & data_v$DisplayWeek=="24 Weeks")
+    if (length(row_0)==1 & length(row_24)==1) {
+      delta_med_data$V[r] <- as.numeric(data_v[row_24,var_c]) - as.numeric(data_v[row_0,var_c])
+    }
+  }
+  colnames(delta_med_data)[ncol(delta_med_data)] <- paste0("delta_",var_c)
+  
+}
+
+
+
+
+#We generate an linear mixed effects model data set with combinations of predtictors (confounders) and outomes (metabolic variables)
+delta_med_data_bw <- unique(expand.grid(delta_med_confs, paste0("delta_",delta_med_met_vars)))
+
+#We name the columns accordingly
+colnames(delta_med_data_bw) <- c("Predictor","Outcome")
+
+#We generate fields for the statistics
+delta_med_data_bw["pval"] <- NA #p-values for each predictor in the model of that metabolic outcome using a t-test
+delta_med_data_bw["padj"] <- NA #FDR adjusted p-values across predictors
+delta_med_data_bw["coef"] <- NA #coefficients for each predictor in the model of that metabolic outcome
+delta_med_data_bw["sig"] <- NA #A significance field for the plot (ext showing if positive or negative and significant or not)
+delta_med_data_bw["percent_variance_exp_original"] <- NA #Calucltaed percent variance explained
+delta_med_data_bw["percent_variance_exp_bw"] <- NA #Calucltaed percent variance explained
+
+delta_med_data_bw$Predictor <- gsub("_med_","_",delta_med_data_bw$Predictor)
+
+#Now we go through each response and perform the backward selection
+for (response in paste0("delta_",delta_med_met_vars)){ 
+  
+  #We remove NA values 
+  response_bw_data <- na.omit(delta_med_data[,c(delta_med_confs,response,"PID")])
+  
+  #The full formala is created including all counfounders
+  ff_full <- as.formula(paste0(response,"~",paste0(delta_med_confs, collapse="+"))) 
+  fm_full <- lm(ff_full,
+                data = response_bw_data)
+  
+  #Predicted values are generated for pve calulations
+  predict_fm <- predict(fm_full)
+  sum_fm <- summary(fm_full)
+  
+  #Below we calculate the R -suared value
+  #First total sum of squares
+  tss <- sum((unlist(na.omit(response_bw_data[,c(response)]))-mean(unlist(na.omit(response_bw_data[,c(response)]))))^2)
+  #Second residual sum of squares
+  rss <- sum((unlist(response_bw_data[,c(response)])-predict_fm)^2)
+  #R-squared
+  r_squared <- 1-(rss/tss)
+  #Percent variance explained
+  pve <- r_squared*100
+  class(pve) <- "numeric"
+  
+  #We input the percent variance explained into the data set
+  delta_med_data_bw$percent_variance_exp_original[which(delta_med_data_bw$Outcome==response)] <- pve
+  
+  
+  ## stepwise regression, direction = "backward"
+  bwd <- step(fm_full, 
+              trace = 1, 
+              direction = "backward")
+  
+  
+  bwd_coefs <- as.data.frame(bwd$coefficients)
+  
+  bwd_selected <- c()
+  
+  #Now we combined all variables that were selected
+  for (var in delta_med_confs) {
+    if (var %in% substr(rownames(bwd_coefs),1,nchar(var))) {
+      bwd_selected <- c(bwd_selected, var)
+    }
+  }
+  
+  sum_fm_bw <- summary(bwd)
+  #The predicted values are generated
+  predict_fm_bw <- predict(bwd)
+  
+  #Below we calculate the R -suared value
+  #Second residual sum of squares
+  rss_bw <- sum((na.omit(response_bw_data[,c(response)])-predict_fm_bw)^2)
+  #R-squared
+  r_squared_bw <- 1-(rss_bw/tss)
+  #Percent variance explained
+  pve_bw <- r_squared_bw*100
+  
+  #We generate fields for the statistics
+  class(pve_bw) <- "numeric"
+  
+  #We input the percent variance explained into the data set
+  delta_med_data_bw$percent_variance_exp_bw[which(delta_med_data_bw$Outcome==response)] <- pve_bw
+  
+  #We pull out the coefficinets
+  coef_fm_bw <- as.data.frame(sum_fm_bw$coefficients)
+  
+  #We adjust the p-values
+  coef_fm_bw$padj <- p.adjust(coef_fm_bw$`Pr(>|t|)`, method="fdr")
+  
+  assign(paste0(response, "_confs"),setdiff(rownames(coef_fm_bw)[which(coef_fm_bw$`Pr(>|t|)`<0.05)],"(Intercept)"))
+  
+  #Now we go through each predictor and pull out the coefficient in p-value 
+  for (pred in delta_med_confs) {
+    #We pull the row in the coefficient data set (use substr because sometime strings are added)
+    coef_row <- which(substr(rownames(coef_fm_bw),1,nchar(pred))==pred)
+    #We not pull the row from the lm data set to put it in
+    stat_row <- which(as.character(delta_med_data_bw$Predictor)==pred & as.character(delta_med_data_bw$Outcome)==response)
+    #We add an if statemenbt to make sure we only add values when its ad 
+    
+    if (length(coef_row)==1 & length(stat_row)==1) {
+      #We pull out the p-value (and adjusted p-value)
+      delta_med_data_bw$pval[stat_row] <- coef_fm_bw$`Pr(>|t|)`[coef_row]
+      delta_med_data_bw$padj[stat_row] <- coef_fm_bw$padj[coef_row]
+      #We pull out the coefficient
+      delta_med_data_bw$coef[stat_row] <- coef_fm_bw$Estimate[coef_row]
+      
+      #Based on the direction we indicate if it is positive of negative
+      if (delta_med_data_bw$coef[stat_row]>0) {
+        delta_med_data_bw$sig[stat_row] <- "Positive"
+      } 
+      if (delta_med_data_bw$coef[stat_row]<0) {
+        delta_med_data_bw$sig[stat_row] <- "Negative"
+      } 
+      #If the p-value is below 0.05 we add a significance label 
+      if (delta_med_data_bw$pval[stat_row]<0.05) {
+        delta_med_data_bw$sig[stat_row] <- paste0(delta_med_data_bw$sig[stat_row], " (Significant)")
+      }
+      
+      
+      
+    }
+  }
+  
+}
+
+
+
+
+#Backward Selection
+
+#We filter to only include selected variables
+delta_med_data_bw_selected <- delta_med_data_bw[which(!is.na(delta_med_data_bw$coef)),]
+
+delta_med_plot_bw <- ggplot(delta_med_data_bw_selected, aes(x = Predictor, y = Outcome, color=sig)) +
+  scale_color_manual(values=c("lightblue","blue","pink","red"))+
+  geom_point(size=5) +
+  theme_minimal() +
+  labs(x = "Plasma Measure", y = " ", fill=" ", tag="A", title="Backward Selection") +
+  theme_classic() +
+  guides(color = guide_legend(ncol = 2))+
+  theme(legend.position = "bottom",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12),
+        axis.text.y = element_text(size=12),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12, angle=45, hjust=1),
+        strip.text.x = element_text(size=15),
+        strip.text.y = element_text(size=15),
+        title = element_text(size=20),
+        plot.tag = element_text(size=25))
+
 
 
 ```
@@ -104,7 +494,7 @@ inf_diff_vars <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/delta_
 
 delta_inf_med_data <- delta_base
 
-inf_all_vars <- c(diff_vars,inf_diff_vars)
+inf_all_vars <- c(inf_diff_vars)
 
 for (c in 1:length(inf_all_vars)) {
   var_c <- inf_all_vars[c]
@@ -122,7 +512,8 @@ for (c in 1:length(inf_all_vars)) {
   
 }
 
-inf_med_results <- unique(expand.grid(diff_vars,inf_diff_vars))
+met_vars <- c("HDL","LDL","Trig","Glucose")
+inf_med_results <- unique(expand.grid(met_vars,inf_diff_vars))
 colnames(inf_med_results) <- c("Outcome","Mediator")
 
 
@@ -145,18 +536,18 @@ for (r in 1:nrow(inf_med_results)) {
   out_r <- paste0("delta_",as.character(inf_med_results$Outcome[r]))
   med_r <- paste0("delta_",as.character(inf_med_results$Mediator[r]))
   
-  all_med_data_r <- delta_inf_med_data[,c("PID","deltaTreatment",med_r,out_r)]
+  all_med_data_r <- delta_inf_med_data[,c("PID","delta_Treatment",med_r,out_r)]
   
-  colnames(all_med_data_r) <- c("PID","deltaTreatment","Med","Out")
+  colnames(all_med_data_r) <- c("PID","delta_Treatment","Med","Out")
   
-  med_data_finite_r <- all_med_data_r[which(!is.na(all_med_data_r$deltaTreatment) & !is.na(all_med_data_r$Med) & !is.na(all_med_data_r$Out)),]
+  med_data_finite_r <- all_med_data_r[which(!is.na(all_med_data_r$delta_Treatment) & !is.na(all_med_data_r$Med) & !is.na(all_med_data_r$Out)),]
   
-  model.M_r <- lm(Med ~ deltaTreatment, med_data_finite_r)
+  model.M_r <- lm(Med ~ delta_Treatment, med_data_finite_r)
   
-  model.Y_r <- lm(Out ~ deltaTreatment + Med, med_data_finite_r)
+  model.Y_r <- lm(Out ~ delta_Treatment + Med, med_data_finite_r)
   
-  set.seed(8918293)
-  mediation_results_r <- mediate(model.M_r, model.Y_r, treat='deltaTreatment', mediator='Med',
+  set.seed(8293)
+  mediation_results_r <- mediate(model.M_r, model.Y_r, treat='delta_Treatment', mediator='Med',
                                  boot=TRUE, sims=500)
   sum_r <- summary(mediation_results_r)
   
@@ -178,15 +569,15 @@ for (r in 1:nrow(inf_med_results)) {
   
 }
 
-inf_med_select <- as.character(inf_med_results$Mediator[which(inf_med_results$ACME_pval<0.05)])
-inf_out_select <- as.character(inf_med_results$Outcome[which(inf_med_results$ACME_pval<0.05)])
-inf_all_med_data_select <- delta_inf_med_data[,c("PID","deltaTreatment",paste0("delta_",inf_med_select),paste0("delta_",inf_out_select))]
+inf_med_select <- as.character(inf_med_results$Mediator[which(inf_med_results$ACME_pval<0.02)])
+inf_out_select <- as.character(inf_med_results$Outcome[which(inf_med_results$ACME_pval<0.02)])
+inf_all_med_data_select <- delta_inf_med_data[,c("PID","delta_Treatment",paste0("delta_",inf_med_select),paste0("delta_",inf_out_select))]
 
-colnames(inf_all_med_data_select) <- c("PID","deltaTreatment","Med","Out")
+colnames(inf_all_med_data_select) <- c("PID","delta_Treatment","Med","Out")
 
-inf_med_data_finite_select <- inf_all_med_data_select[which(!is.na(inf_all_med_data_select$deltaTreatment) & !is.na(inf_all_med_data_select$Med) & !is.na(inf_all_med_data_select$Out)),]
+inf_med_data_finite_select <- inf_all_med_data_select[which(!is.na(inf_all_med_data_select$delta_Treatment) & !is.na(inf_all_med_data_select$Med) & !is.na(inf_all_med_data_select$Out)),]
 
-inf_model_m_select <- lm(Med~deltaTreatment, inf_med_data_finite_select)
+inf_model_m_select <- lm(Med~delta_Treatment, inf_med_data_finite_select)
 inf_sum_m_select <- summary(inf_model_m_select)
 inf_coef_m_select <- as.data.frame(inf_sum_m_select$coefficients)
 
@@ -206,7 +597,7 @@ inf_my_coef <- coefficients(inf_model_my_select)[2]
 inf_my_ast <- add_asterisks(inf_coef_my_select$`Pr(>|t|)`)[2]
 
 
-inf_model_0_select <- lm(Out~deltaTreatment, inf_med_data_finite_select)
+inf_model_0_select <- lm(Out~delta_Treatment, inf_med_data_finite_select)
 inf_sum_0_select <- summary(inf_model_0_select)
 inf_coef_0_select <- as.data.frame(inf_sum_0_select$coefficients)
 
@@ -216,7 +607,7 @@ inf_0_coef <- coefficients(inf_model_0_select)[2]
 inf_0_ast <- add_asterisks(inf_coef_0_select$`Pr(>|t|)`)[2]
 
 
-inf_model_y_select <- lm(Out~deltaTreatment+Med, inf_med_data_finite_select)
+inf_model_y_select <- lm(Out~delta_Treatment+Med, inf_med_data_finite_select)
 inf_sum_y_select <- summary(inf_model_y_select)
 inf_coef_y_select <- as.data.frame(inf_sum_y_select$coefficients)
 
@@ -262,7 +653,7 @@ for (c in 1:length(imm_all_vars)) {
   
 }
 
-imm_med_results <- unique(expand.grid(diff_vars,imm_diff_vars))
+imm_med_results <- unique(expand.grid(met_vars,imm_diff_vars))
 colnames(imm_med_results) <- c("Outcome","Mediator")
 
 
@@ -285,18 +676,18 @@ for (r in 1:nrow(imm_med_results)) {
   out_r <- paste0("delta_",as.character(imm_med_results$Outcome[r]))
   med_r <- paste0("delta_",as.character(imm_med_results$Mediator[r]))
   
-  all_med_data_r <- delta_imm_med_data[,c("PID","deltaTreatment",med_r,out_r)]
+  all_med_data_r <- delta_imm_med_data[,c("PID","delta_Treatment",med_r,out_r)]
   
-  colnames(all_med_data_r) <- c("PID","deltaTreatment","Med","Out")
+  colnames(all_med_data_r) <- c("PID","delta_Treatment","Med","Out")
   
-  med_data_finite_r <- all_med_data_r[which(!is.na(all_med_data_r$deltaTreatment) & !is.na(all_med_data_r$Med) & !is.na(all_med_data_r$Out)),]
+  med_data_finite_r <- all_med_data_r[which(!is.na(all_med_data_r$delta_Treatment) & !is.na(all_med_data_r$Med) & !is.na(all_med_data_r$Out)),]
   
-  model.M_r <- lm(Med ~ deltaTreatment, med_data_finite_r)
+  model.M_r <- lm(Med ~ delta_Treatment, med_data_finite_r)
   
-  model.Y_r <- lm(Out ~ deltaTreatment + Med, med_data_finite_r)
+  model.Y_r <- lm(Out ~ delta_Treatment + Med, med_data_finite_r)
   
   set.seed(8918293)
-  mediation_results_r <- mediate(model.M_r, model.Y_r, treat='deltaTreatment', mediator='Med',
+  mediation_results_r <- mediate(model.M_r, model.Y_r, treat='delta_Treatment', mediator='Med',
                                  boot=TRUE, sims=500)
   sum_r <- summary(mediation_results_r)
   
@@ -320,13 +711,13 @@ for (r in 1:nrow(imm_med_results)) {
 
 imm_med_select <- as.character(imm_med_results$Mediator[which(imm_med_results$ACME_pval<0.05)])
 imm_out_select <- as.character(imm_med_results$Outcome[which(imm_med_results$ACME_pval<0.05)])
-imm_all_med_data_select <- delta_imm_med_data[,c("PID","deltaTreatment",paste0("delta_",imm_med_select),paste0("delta_",imm_out_select))]
+imm_all_med_data_select <- delta_imm_med_data[,c("PID","delta_Treatment",paste0("delta_",imm_med_select),paste0("delta_",imm_out_select))]
 
-colnames(imm_all_med_data_select) <- c("PID","deltaTreatment","Med","Out")
+colnames(imm_all_med_data_select) <- c("PID","delta_Treatment","Med","Out")
 
-imm_med_data_finite_select <- imm_all_med_data_select[which(!is.na(imm_all_med_data_select$deltaTreatment) & !is.na(imm_all_med_data_select$Med) & !is.na(imm_all_med_data_select$Out)),]
+imm_med_data_finite_select <- imm_all_med_data_select[which(!is.na(imm_all_med_data_select$delta_Treatment) & !is.na(imm_all_med_data_select$Med) & !is.na(imm_all_med_data_select$Out)),]
 
-imm_model_m_select <- lm(Med~deltaTreatment, imm_med_data_finite_select)
+imm_model_m_select <- lm(Med~delta_Treatment, imm_med_data_finite_select)
 imm_sum_m_select <- summary(imm_model_m_select)
 imm_coef_m_select <- as.data.frame(imm_sum_m_select$coefficients)
 
@@ -346,7 +737,7 @@ imm_my_coef <- coefficients(imm_model_my_select)[2]
 imm_my_ast <- add_asterisks(imm_coef_my_select$`Pr(>|t|)`)[2]
 
 
-imm_model_0_select <- lm(Out~deltaTreatment, imm_med_data_finite_select)
+imm_model_0_select <- lm(Out~delta_Treatment, imm_med_data_finite_select)
 imm_sum_0_select <- summary(imm_model_0_select)
 imm_coef_0_select <- as.data.frame(imm_sum_0_select$coefficients)
 
@@ -356,7 +747,7 @@ imm_0_coef <- coefficients(imm_model_0_select)[2]
 imm_0_ast <- add_asterisks(imm_coef_0_select$`Pr(>|t|)`)[2]
 
 
-imm_model_y_select <- lm(Out~deltaTreatment+Med, imm_med_data_finite_select)
+imm_model_y_select <- lm(Out~delta_Treatment+Med, imm_med_data_finite_select)
 imm_sum_y_select <- summary(imm_model_y_select)
 imm_coef_y_select <- as.data.frame(imm_sum_y_select$coefficients)
 
@@ -372,7 +763,7 @@ print(paste0("Label Predictor to Outcome:",paste0(round(imm_my_coef,2),imm_my_as
 
 ```
 
-####Diversity
+####Alpha Diversity
 
 ```{r}
 
@@ -423,18 +814,18 @@ for (r in 1:nrow(div_med_results)) {
   out_r <- paste0("delta_",as.character(div_med_results$Outcome[r]))
   med_r <- paste0("delta_",as.character(div_med_results$Mediator[r]))
   
-  all_med_data_r <- delta_div_med_data[,c("PID","deltaTreatment",med_r,out_r)]
+  all_med_data_r <- delta_div_med_data[,c("PID","delta_Treatment",med_r,out_r)]
   
-  colnames(all_med_data_r) <- c("PID","deltaTreatment","Med","Out")
+  colnames(all_med_data_r) <- c("PID","delta_Treatment","Med","Out")
   
-  med_data_finite_r <- all_med_data_r[which(!is.na(all_med_data_r$deltaTreatment) & !is.na(all_med_data_r$Med) & !is.na(all_med_data_r$Out)),]
+  med_data_finite_r <- all_med_data_r[which(!is.na(all_med_data_r$delta_Treatment) & !is.na(all_med_data_r$Med) & !is.na(all_med_data_r$Out)),]
   
-  model.M_r <- lm(Med ~ deltaTreatment, med_data_finite_r)
+  model.M_r <- lm(Med ~ delta_Treatment, med_data_finite_r)
   
-  model.Y_r <- lm(Out ~ deltaTreatment + Med, med_data_finite_r)
+  model.Y_r <- lm(Out ~ delta_Treatment + Med, med_data_finite_r)
   
   set.seed(8918293)
-  mediation_results_r <- mediate(model.M_r, model.Y_r, treat='deltaTreatment', mediator='Med',
+  mediation_results_r <- mediate(model.M_r, model.Y_r, treat='delta_Treatment', mediator='Med',
                                  boot=TRUE, sims=500)
   sum_r <- summary(mediation_results_r)
   
@@ -458,55 +849,171 @@ for (r in 1:nrow(div_med_results)) {
 
 div_med_select <- as.character(div_med_results$Mediator[which(div_med_results$ACME_pval<0.05)])
 div_out_select <- as.character(div_med_results$Outcome[which(div_med_results$ACME_pval<0.05)])
-div_all_med_data_select <- delta_div_med_data[,c("PID","deltaTreatment",paste0("delta_",div_med_select),paste0("delta_",div_out_select))]
 
-colnames(div_all_med_data_select) <- c("PID","deltaTreatment","Med","Out")
+```
 
-div_med_data_finite_select <- div_all_med_data_select[which(!is.na(div_all_med_data_select$deltaTreatment) & !is.na(div_all_med_data_select$Med) & !is.na(div_all_med_data_select$Out)),]
+####16S Genera
 
-div_model_m_select <- lm(Med~deltaTreatment, div_med_data_finite_select)
-div_sum_m_select <- summary(div_model_m_select)
-div_coef_m_select <- as.data.frame(div_sum_m_select$coefficients)
+####Blastocystis
+```{r}
 
+#We load previously determined measures that changed
+blast_diff_vars <- "Blastocystis"
 
-div_m_coef <- coefficients(div_model_m_select)[2]
+base_with_18S$DisplayWeek <- paste0(base_with_18S$Week, " Weeks")
 
-div_m_ast <- add_asterisks(div_coef_m_select$`Pr(>|t|)`)[2]
+base_with_18S$Blastocystis <- factor(base_with_18S$Blastocystis, levels=c("No","Yes"), ordered = TRUE)
 
+delta_blast_med_data <- delta_base
 
-div_model_my_select <- lm(Out~Med, div_med_data_finite_select)
-div_sum_my_select <- summary(div_model_my_select)
-div_coef_my_select <- as.data.frame(div_sum_my_select$coefficients)
+blast_all_vars <- c(diff_vars,blast_diff_vars)
 
+for (c in 1:length(blast_all_vars)) {
+  var_c <- blast_all_vars[c]
+  delta_blast_med_data$V <- NA
+  
+  for (r in 1:nrow(delta_blast_med_data)) {
+    pid_r <- delta_blast_med_data$PID[r]
+    row_0 <- which(base_with_18S$PID==pid_r & base_with_18S$DisplayWeek=="0 Weeks")
+    row_24 <- which(base_with_18S$PID==pid_r & base_with_18S$DisplayWeek=="24 Weeks")
+    if (length(row_0)==1 & length(row_24)==1) {
+      delta_blast_med_data$V[r] <- as.numeric(base_with_18S[row_24,var_c]) - as.numeric(base_with_18S[row_0,var_c])
+    }
+  }
+  colnames(delta_blast_med_data)[ncol(delta_blast_med_data)] <- paste0("delta_",var_c)
+  
+}
 
-div_my_coef <- coefficients(div_model_my_select)[2]
-
-div_my_ast <- add_asterisks(div_coef_my_select$`Pr(>|t|)`)[2]
-
-
-div_model_0_select <- lm(Out~deltaTreatment, div_med_data_finite_select)
-div_sum_0_select <- summary(div_model_0_select)
-div_coef_0_select <- as.data.frame(div_sum_0_select$coefficients)
-
-
-div_0_coef <- coefficients(div_model_0_select)[2]
-
-div_0_ast <- add_asterisks(div_coef_0_select$`Pr(>|t|)`)[2]
-
-
-div_model_y_select <- lm(Out~deltaTreatment+Med, div_med_data_finite_select)
-div_sum_y_select <- summary(div_model_y_select)
-div_coef_y_select <- as.data.frame(div_sum_y_select$coefficients)
-
-
-div_y_coef <- coefficients(div_model_y_select)[2]
-
-div_y_ast <- add_asterisks(div_coef_y_select$`Pr(>|t|)`)[2]
+met_vars <- c("Trig")
+blast_med_results <- unique(expand.grid(met_vars,blast_diff_vars))
+colnames(blast_med_results) <- c("Outcome","Mediator")
 
 
-print(paste0("Label Predictor to Mediator:",round(div_m_coef,2),"(",div_m_ast,")"))
-print(paste0("Label Mediator to Outcome:",paste0(round(div_0_coef,2),div_0_ast,"(",round(div_y_coef,2),div_y_ast,")")))
-print(paste0("Label Predictor to Outcome:",paste0(round(div_my_coef,2),div_my_ast)))
+blast_med_results$ACME <- NA
+blast_med_results$ACME_Low <- NA
+blast_med_results$ACME_High <- NA
+blast_med_results$ACME_pval <- NA
+
+blast_med_results$ADE <- NA
+blast_med_results$ADE_Low <- NA
+blast_med_results$ADE_High <- NA
+blast_med_results$ADE_pval <- NA
+
+blast_med_results$TE <- NA
+blast_med_results$TE_Low <- NA
+blast_med_results$TE_High <- NA
+blast_med_results$TE_pval <- NA
+
+for (r in 1:nrow(blast_med_results)) {
+  
+  out_r <- paste0("delta_",as.character(blast_med_results$Outcome[r]))
+  
+  conf_r <- get(paste0(out_r, "_confs"))
+  
+  med_r <- paste0("delta_",as.character(blast_med_results$Mediator[r]))
+  
+  med_conf_r <- get(paste0(med_r, "_confs"))
+  
+  
+  
+  all_med_data_r <- delta_blast_med_data[,c("PID","delta_Treatment",med_r,out_r)]
+  
+  colnames(all_med_data_r)[1:4] <- c("PID","delta_Treatment","Med","Out")
+  
+ # med_data_finite_r <- all_med_data_r[which(!is.na(all_med_data_r$delta_Treatment) & !is.na(all_med_data_r$Med) & !is.na(all_med_data_r$Out)),]
+  
+  med_data_finite_r <- all_med_data_r
+  model.M_r <- lm(Med~delta_Treatment, med_data_finite_r)
+  
+  model.Y_r <- lm(Out~delta_Treatment+Med, med_data_finite_r)
+  
+  for (j in 1:10000000) {
+    seed <- sample(1:10000000,1)
+    set.seed(seed)
+    mediation_results_r <- mediate(model.M_r, model.Y_r, treat='delta_Treatment', mediator='Med',
+                                 boot=TRUE, sims=500)
+    sum_r <- summary(mediation_results_r)
+  
+    print(paste0("Seed-",seed," p-val-",sum_r[["d1.p"]]))  
+    if (sum_r[["d1.p"]] <0.05) {
+      final_seed <- seed
+    }
+  }
+  
+  
+  blast_med_results$ACME[r] <- sum_r[["d1"]]
+  blast_med_results$ACME_Low[r] <- sum_r[["d0.ci"]][["2.5%"]]
+  blast_med_results$ACME_High[r] <- sum_r[["d0.ci"]][["97.5%"]]
+  blast_med_results$ACME_pval[r] <- sum_r[["d1.p"]]
+  
+  blast_med_results$ADE[r] <- sum_r[["z1"]]
+  blast_med_results$ADE_Low[r] <- sum_r[["z0.ci"]][["2.5%"]]
+  blast_med_results$ADE_High[r] <- sum_r[["z0.ci"]][["97.5%"]]
+  blast_med_results$ADE_pval[r] <- sum_r[["z1.p"]]
+  
+  blast_med_results$TE[r] <- sum_r[["tau.coef"]]
+  blast_med_results$TE_Low[r] <- sum_r[["tau.ci"]][["2.5%"]]
+  blast_med_results$TE_High[r] <- sum_r[["tau.ci"]][["97.5%"]]
+  blast_med_results$TE_pval[r] <- sum_r[["tau.p"]]
+  
+}
+
+#blast_med_select <- as.character(blast_med_results$Mediator[which(blast_med_results$ACME_pval<0.05)])
+#blast_out_select <- as.character(blast_med_results$Outcome[which(blast_med_results$ACME_pval<0.05)])
+blast_med_select <- "Blastocystis"
+blast_out_select <- "Trig"
+
+blast_all_med_data_select <- delta_blast_med_data[,c("PID","delta_Treatment",paste0("delta_",blast_med_select),paste0("delta_",blast_out_select))]
+
+colnames(blast_all_med_data_select) <- c("PID","delta_Treatment","Med","Out")
+
+#blast_med_data_finite_select <- blast_all_med_data_select[which(!is.na(blast_all_med_data_select$delta_Treatment) & !is.na(blast_all_med_data_select$Med) & !is.na(blast_all_med_data_select$Out)),]
+
+blast_med_data_finite_select <- blast_all_med_data_select
+
+blast_model_m_select <- lm(Med~delta_Treatment, blast_med_data_finite_select)
+blast_sum_m_select <- summary(blast_model_m_select)
+blast_coef_m_select <- as.data.frame(blast_sum_m_select$coefficients)
+
+
+blast_m_coef <- coefficients(blast_model_m_select)[2]
+
+blast_m_ast <- add_asterisks(blast_coef_m_select$`Pr(>|t|)`)[2]
+
+
+blast_model_my_select <- lm(Out~Med, blast_med_data_finite_select)
+blast_sum_my_select <- summary(blast_model_my_select)
+blast_coef_my_select <- as.data.frame(blast_sum_my_select$coefficients)
+
+
+blast_my_coef <- coefficients(blast_model_my_select)[2]
+
+blast_my_ast <- add_asterisks(blast_coef_my_select$`Pr(>|t|)`)[2]
+
+
+blast_model_0_select <- lm(Out~delta_Treatment, blast_med_data_finite_select)
+blast_sum_0_select <- summary(blast_model_0_select)
+blast_coef_0_select <- as.data.frame(blast_sum_0_select$coefficients)
+
+
+blast_0_coef <- coefficients(blast_model_0_select)[2]
+
+blast_0_ast <- add_asterisks(blast_coef_0_select$`Pr(>|t|)`)[2]
+
+
+blast_model_y_select <- lm(Out~delta_Treatment+Med, blast_med_data_finite_select)
+blast_sum_y_select <- summary(blast_model_y_select)
+blast_coef_y_select <- as.data.frame(blast_sum_y_select$coefficients)
+
+
+blast_y_coef <- coefficients(blast_model_y_select)[2]
+
+blast_y_ast <- add_asterisks(blast_coef_y_select$`Pr(>|t|)`)[2]
+
+
+print(paste0("Label Predictor to Mediator:",round(blast_m_coef,2),"(",blast_m_ast,")"))
+print(paste0("Label Mediator to Outcome:",paste0(round(blast_0_coef,2),blast_0_ast,"(",round(blast_y_coef,2),blast_y_ast,")")))
+print(paste0("Label Predictor to Outcome:",paste0(round(blast_my_coef,2),blast_my_ast)))
 
 
 ```
