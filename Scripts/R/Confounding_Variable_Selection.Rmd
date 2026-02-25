@@ -44,13 +44,15 @@ metadata_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/met
 base_t1 <- base[which(base$Week=="0"),]
 
 
+  
+
 ```
 
-###Variable Selection
 
-Backwards selection is used to identify confounding contributers to the metabolic markers
+###Variable Definition and filtering
 
-####Initial Variables Defined
+Outcomes and confounders are manually selected
+
 ```{r}
 
 #Metabolic outcome variables are defined
@@ -99,7 +101,152 @@ confs <- c("Visit_Age",
            "Total_Snacks"
            )
 
+
+# 1. Identify which variables are categorical vs numerical
+cat_vars <- confs[sapply(base_t1[confs], is.factor) | sapply(base_t1[confs], is.character)]
+num_vars <- confs[sapply(base_t1[confs], is.numeric)]
+
+# Initialize a results list
+bivariate_results <- list()
+
+# --- A. Spearman Correlation with P-Values (Numerical vs Numerical) ---
+if(length(num_vars) > 1) {
+  # Create all unique pairs of numerical variables
+  num_combos <- expand.grid(Var1 = num_vars, Var2 = num_vars) %>%
+    filter(as.character(Var1) < as.character(Var2)) # Avoid self-correlation and duplicates
+  
+  bivariate_results$num_num <- apply(num_combos, 1, function(row) {
+    # cor.test provides the p-value
+    test <- cor.test(base_t1[[row[1]]], base_t1[[row[2]]], 
+                     method = "spearman", exact = FALSE)
+    
+    data.frame(
+      Predictor_A = row[1], 
+      Predictor_B = row[2], 
+      Rho = test$estimate, 
+      p_val = test$p.value
+    )
+  }) %>% bind_rows() %>% arrange(p_val)
+}
+
+# --- B. Chi-Square Test (Categorical vs Categorical) ---
+cat_combos <- expand.grid(Var1 = cat_vars, Var2 = cat_vars) %>% 
+  filter(as.character(Var1) < as.character(Var2))
+
+bivariate_results$cat_cat <- apply(cat_combos, 1, function(row) {
+  # Clean out missing data for the table
+  tab <- table(base_t1[[row[1]]], base_t1[[row[2]]])
+  
+  # Only run if table has dimensions
+  if(nrow(tab) > 1 & ncol(tab) > 1) {
+    test <- chisq.test(tab)
+    return(data.frame(Var1 = row[1], Var2 = row[2], p_val = test$p.value))
+  }
+  return(NULL)
+}) %>% bind_rows() %>% arrange(p_val)
+
+# --- C. Wilcoxon Rank Sum (Numerical vs Categorical) ---
+mixed_combos <- expand.grid(Num = num_vars, Cat = cat_vars)
+
+bivariate_results$num_cat <- apply(mixed_combos, 1, function(row) {
+  # Ensure the category has exactly 2 levels for Wilcoxon
+  lvls <- length(unique(na.omit(base_t1[[row[2]]])))
+  
+  if(lvls == 2) {
+    test <- wilcox.test(as.formula(paste(row[1], "~", row[2])), data = base_t1)
+    return(data.frame(Numeric = row[1], Category = row[2], p_val = test$p.value))
+  } else if (lvls > 2) {
+    # If more than 2 levels (e.g., Location with 3+ types), use Kruskal-Wallis
+    test <- kruskal.test(as.formula(paste(row[1], "~", row[2])), data = base_t1)
+    return(data.frame(Numeric = row[1], Category = row[2], p_val = test$p.value))
+  }
+  return(NULL)
+}) %>% bind_rows() %>% arrange(p_val)
+
+
+# --- 1. Numerical-Numerical (High Rho & Significant) ---
+high_cor_num <- bivariate_results$num_num %>%
+  filter(p_val < 0.05) %>%
+  mutate(Type = "Num-Num (Spearman)")
+
+# --- 2. Categorical-Categorical (Highly Associated) ---
+high_cor_cat <- bivariate_results$cat_cat %>%
+  filter(p_val < 0.01) %>% # Stricter p-value for Chi-square
+  mutate(Type = "Cat-Cat (Chi-Square)")
+
+# --- 3. Mixed Numerical-Categorical (Significant Differences) ---
+high_cor_mixed <- bivariate_results$num_cat %>%
+  filter(p_val < 0.05) %>%
+  mutate(Type = "Num-Cat (Wilcox/Kruskal)")
+
+# Display a consolidated 'Warning' table
+warning_table <- bind_rows(
+  high_cor_num %>% select(Var1 = Predictor_A, Var2 = Predictor_B, p_val, Type),
+  high_cor_cat %>% select(Var1, Var2, p_val, Type),
+  high_cor_mixed %>% select(Var1 = Numeric, Var2 = Category, p_val, Type)
+)
+
+print(warning_table)
+#We do see correlations
+
+# Quick check for Multicollinearity
+
+# 1. Log Transformation & Scaling
+base_t1_model <- base_t1 %>%
+  mutate(across(where(is.ordered), as.factor)) # Convert ordered to regular factors
+
+# Apply log transform to outcomes that failed normality
+for(met in met_vars) {
+  base_t1_model[[paste0(met, "_log")]] <- log10(base_t1_model[[met]] + 1)
+}
+met_vars_log <- paste0(met_vars, "_log")
+
+# We use a dummy model with all confounders to see who is 'fighting'
+hdl_vif_model <- lm(as.formula(paste("HDL_log", "~", paste(confs, collapse="+"))), data = base_t1_model)
+car::vif(hdl_vif_model)
+
+# We use a dummy model with all confounders to see who is 'fighting'
+ldl_vif_model <- lm(as.formula(paste("LDL_log", "~", paste(confs, collapse="+"))), data = base_t1_model)
+car::vif(ldl_vif_model)
+
+# We use a dummy model with all confounders to see who is 'fighting'
+glucose_vif_model <- lm(as.formula(paste("Glucose_log", "~", paste(confs, collapse="+"))), data = base_t1_model)
+car::vif(glucose_vif_model)
+
+# We use a dummy model with all confounders to see who is 'fighting'
+trig_vif_model <- lm(as.formula(paste("Trig_log", "~", paste(confs, collapse="+"))), data = base_t1_model)
+car::vif(trig_vif_model)
+
+#Variance Inflation Factors are reasonable so do not need to move forward with limiting these 
+
 ```
+
+#Data Split
+
+This chunk prepares the data for all subsequent modeling sections.
+```{r}
+
+# Scale numeric predictors
+num_confs <- confs[sapply(base_t1_model[,confs], is.numeric)]
+base_t1_model[, num_confs] <- scale(base_t1_model[, num_confs])
+
+# 2. Global Test/Train Split (ensures all methods use the same data)
+# We store these in a list keyed by the response name
+data_splits <- list()
+
+for (response in met_vars_log) {
+  working_data <- na.omit(base_t1_model[, c(confs, response)])
+  
+  set.seed(123)
+  train_idx <- createDataPartition(working_data[[response]], p = 0.7, list = FALSE)
+  
+  data_splits[[response]] <- list(
+    train = working_data[train_idx, ],
+    test  = working_data[-train_idx, ]
+  )
+}
+```
+
 
 
 ####Stepwise Selection 
@@ -107,855 +254,592 @@ confs <- c("Visit_Age",
 #####Backward
 
 ```{r}
+# Initialize results for this section
+performance_bw <- data.frame()
+selection_data_bw <- data.frame()
+plots_importance_bw <- list()
+plots_pred_obs_bw <- list()
 
-#We generate an linear mixed effects model data set with combinations of predtictors (confounders) and outomes (metabolic variables)
-t1_data_bw <- unique(expand.grid(confs, met_vars))
-
-#We name the columns accordingly
-colnames(t1_data_bw) <- c("Predictor","Outcome")
-
-#We generate fields for the statistics
-t1_data_bw["pval"] <- NA #p-values for each predictor in the model of that metabolic outcome using a t-test
-t1_data_bw["padj"] <- NA #FDR adjusted p-values across predictors
-t1_data_bw["coef"] <- NA #coefficients for each predictor in the model of that metabolic outcome
-t1_data_bw["sig"] <- NA #A significance field for the plot (ext showing if positive or negative and significant or not)
-t1_data_bw["percent_variance_exp_original"] <- NA #Calucltaed percent variance explained
-t1_data_bw["percent_variance_exp_bw"] <- NA #Calucltaed percent variance explained
-
-#Now we go through each response and perform the backward selection
-for (response in met_vars){ 
+for (response in met_vars_log) {
+  # Pull the specific split for this response
+  train_df <- data_splits[[response]]$train
+  test_df  <- data_splits[[response]]$test
   
-  #We remove NA values 
-  response_bw_data <- na.omit(base_t1[,c(confs,response,"PID")])
+  # 1. Fit the Model
+  full_formula <- as.formula(paste0(response, " ~ ."))
+  full_lm <- lm(full_formula, data = train_df)
+  bw_model <- step(full_lm, direction = "backward", trace = 0)
   
-  #The full formala is created including all counfounders
-  ff_full <- as.formula(paste0(response,"~",paste0(confs, collapse="+"))) 
-  fm_full <- lm(ff_full,
-                data = response_bw_data)
+  # 2. Predictions & Performance
+  bw_preds <- predict(bw_model, newdata = test_df)
+  performance_bw <- rbind(performance_bw, 
+                          get_metrics(test_df[[response]], bw_preds, "Backward", response))
   
-  #Predicted values are generated for pve calulations
-  predict_fm <- predict(fm_full)
-  sum_fm <- summary(fm_full)
+  # 3. Importance Data (Coefficients)
+  # Clean names to map 'GenderMale' -> 'Gender'
+  coef_raw <- as.data.frame(summary(bw_model)$coefficients)
+  colnames(coef_raw) <- c("Estimate", "StdErr", "t_val", "p_val")
   
-  #Below we calculate the R -suared value
-  #First total sum of squares
-  tss <- sum((unlist(na.omit(response_bw_data[,c(response)]))-mean(unlist(na.omit(response_bw_data[,c(response)]))))^2)
-  #Second residual sum of squares
-  rss <- sum((unlist(response_bw_data[,c(response)])-predict_fm)^2)
-  #R-squared
-  r_squared <- 1-(rss/tss)
-  #Percent variance explained
-  pve <- r_squared*100
-  class(pve) <- "numeric"
+  coef_df <- coef_raw %>%
+    filter(rownames(.) != "(Intercept)") %>%
+    mutate(
+      Predictor = clean_pred_names(rownames(.), confs),
+      Outcome = response,
+      Direction = ifelse(Estimate > 0, "Positive", "Negative"),
+      Sig = ifelse(p_val < 0.05, "Significant", "Non-Sig")
+    )
+  selection_data_bw <- rbind(selection_data_bw, coef_df)
   
-  #We input the percent variance explained into the data set
-  t1_data_bw$percent_variance_exp_original[which(t1_data_bw$Outcome==response)] <- pve
-
-    
-  ## stepwise regression, direction = "backward"
-  bwd <- step(fm_full, 
-              trace = 1, 
-              direction = "backward")
-
+  # 4. Generate Plots
+  # Importance Plot
+  plots_importance_bw[[response]] <- ggplot(coef_df, aes(x = reorder(Predictor, Estimate), y = Estimate, fill = Direction)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    theme_minimal() +
+    labs(title = paste("BW Importance:", response), x = "Confounder", y = "Standardized Coefficient")
   
-  bwd_coefs <- as.data.frame(bwd$coefficients)
-  
-  bwd_selected <- c()
-  
-  #Now we combined all variables that were selected
-  for (var in confs) {
-    if (var %in% substr(rownames(bwd_coefs),1,nchar(var))) {
-      bwd_selected <- c(bwd_selected, var)
-    }
-  }
-  
-  sum_fm_bw <- summary(bwd)
-  #The predicted values are generated
-  predict_fm_bw <- predict(bwd)
-  
-  #Below we calculate the R -suared value
-  #Second residual sum of squares
-  rss_bw <- sum((na.omit(response_bw_data[,c(response)])-predict_fm_bw)^2)
-  #R-squared
-  r_squared_bw <- 1-(rss_bw/tss)
-  #Percent variance explained
-  pve_bw <- r_squared_bw*100
-  
-  #We generate fields for the statistics
-  class(pve_bw) <- "numeric"
-  
-  #We input the percent variance explained into the data set
-  t1_data_bw$percent_variance_exp_bw[which(t1_data_bw$Outcome==response)] <- pve_bw
-
-  #We pull out the coefficinets
-  coef_fm_bw <- as.data.frame(sum_fm_bw$coefficients)
-  
-  #We adjust the p-values
-  coef_fm_bw$padj <- p.adjust(coef_fm_bw$`Pr(>|t|)`, method="fdr")
-  
-  #Now we go through each predictor and pull out the coefficient in p-value 
-  for (pred in confs) {
-    #We pull the row in the coefficient data set (use substr because sometime strings are added)
-    coef_row <- which(substr(rownames(coef_fm_bw),1,nchar(pred))==pred)
-    #We not pull the row from the lm data set to put it in
-    stat_row <- which(as.character(t1_data_bw$Predictor)==pred & as.character(t1_data_bw$Outcome)==response)
-    #We add an if statemenbt to make sure we only add values when its ad 
-    
-    if (length(coef_row)==1 & length(stat_row)==1) {
-      #We pull out the p-value (and adjusted p-value)
-      t1_data_bw$pval[stat_row] <- coef_fm_bw$`Pr(>|t|)`[coef_row]
-      t1_data_bw$padj[stat_row] <- coef_fm_bw$padj[coef_row]
-      #We pull out the coefficient
-      t1_data_bw$coef[stat_row] <- coef_fm_bw$Estimate[coef_row]
-      
-      #Based on the direction we indicate if it is positive of negative
-      if (t1_data_bw$coef[stat_row]>0) {
-        t1_data_bw$sig[stat_row] <- "Positive"
-      } 
-      if (t1_data_bw$coef[stat_row]<0) {
-        t1_data_bw$sig[stat_row] <- "Negative"
-      } 
-      #If the p-value is below 0.05 we add a significance label 
-      if (t1_data_bw$pval[stat_row]<0.05) {
-        t1_data_bw$sig[stat_row] <- paste0(t1_data_bw$sig[stat_row], " (Significant)")
-      }
-      
-      
-      
-    }
-  }
-  
+  # Pred vs Obs Plot
+  pred_obs_df <- data.frame(Observed = test_df[[response]], Predicted = bw_preds)
+  plots_pred_obs_bw[[response]] <- ggplot(pred_obs_df, aes(x = Observed, y = Predicted)) +
+    geom_point(color = "blue", alpha = 0.6) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    theme_classic() +
+    labs(title = paste("BW Pred vs Obs:", response), subtitle = paste("R2 =", round(tail(performance_bw$R2, 1), 3)))
 }
-  
+
+# Display Performance
+print(performance_bw)
 
 ```
 
 #####Forward
 ```{r}
 
+# Initialize results for this section
+performance_fw <- data.frame()
+selection_data_fw <- data.frame()
+plots_importance_fw <- list()
+plots_pred_obs_fw <- list()
 
-#We generate an linear mixed effects model data set with combinations of predtictors (confounders) and outomes (metabolic variables)
-t1_data_fw <- unique(expand.grid(confs, met_vars))
-
-#We name the columns accordingly
-colnames(t1_data_fw) <- c("Predictor","Outcome")
-
-#We generate fields for the statistics
-t1_data_fw["pval"] <- NA #p-values for each predictor in the model of that metabolic outcome using a t-test
-t1_data_fw["padj"] <- NA #FDR adjusted p-values across predictors
-t1_data_fw["coef"] <- NA #coefficients for each predictor in the model of that metabolic outcome
-t1_data_fw["sig"] <- NA #A significance field for the plot (ext showing if positive or negative and significant or not)
-t1_data_fw["percent_variance_exp_original"] <- NA #Calucltaed percent variance explained
-t1_data_fw["percent_variance_exp_fw"] <- NA #Calucltaed percent variance explained
-
-#Now we go through each response and perform the backward selection
-for (response in met_vars){ 
+for (response in met_vars_log) {
+  # Pull the specific split for this response
+  train_df <- data_splits[[response]]$train
+  test_df  <- data_splits[[response]]$test
   
-  #We remove NA values 
-  response_fw_data <- na.omit(base_t1[,c(confs,response,"PID")])
+  # 1. Fit the Model (Forward requires a null model and a scope)
+  null_model <- lm(as.formula(paste0(response, " ~ 1")), data = train_df)
+  full_formula <- as.formula(paste0(response, " ~ ."))
   
-  #The full formala is created including all counfounders
-  ff_full <- as.formula(paste0(response,"~",paste0(confs, collapse="+"))) 
-  fm_full <- lm(ff_full,
-                data = response_fw_data)
+  # Perform Forward Selection
+  fw_model <- step(null_model, 
+                   scope = list(lower = null_model, upper = full_formula), 
+                   direction = "forward", 
+                   trace = 0)
   
-  #Predicted values are generated for pve calulations
-  predict_fm <- predict(fm_full)
-  sum_fm <- summary(fm_full)
+  # 2. Predictions & Performance (Testing on holdout set)
+  fw_preds <- predict(fw_model, newdata = test_df)
+  performance_fw <- rbind(performance_fw, 
+                          get_metrics(test_df[[response]], fw_preds, "Forward", response))
   
-  #Below we calculate the R -suared value
-  #First total sum of squares
-  tss <- sum((unlist(na.omit(response_fw_data[,c(response)]))-mean(unlist(na.omit(response_fw_data[,c(response)]))))^2)
-  #Second residual sum of squares
-  rss <- sum((unlist(response_fw_data[,c(response)])-predict_fm)^2)
-  #R-squared
-  r_squared <- 1-(rss/tss)
-  #Percent variance explained
-  pve <- r_squared*100
-  class(pve) <- "numeric"
+  # 3. Importance Data (Coefficients)
+  # Clean names to map 'GenderMale' -> 'Gender'
+  coef_raw <- as.data.frame(summary(fw_model)$coefficients)
+  colnames(coef_raw) <- c("Estimate", "StdErr", "t_val", "p_val")
   
-  #We input the percent variance explained into the data set
-  t1_data_fw$percent_variance_exp_original[which(t1_data_fw$Outcome==response)] <- pve
+  coef_df <- coef_raw %>%
+    filter(rownames(.) != "(Intercept)") %>%
+    mutate(
+      Predictor = clean_pred_names(rownames(.), confs),
+      Outcome = response,
+      Direction = ifelse(Estimate > 0, "Positive", "Negative"),
+      Sig = ifelse(p_val < 0.05, "Significant", "Non-Sig")
+    )
+  selection_data_fw <- rbind(selection_data_fw, coef_df)
   
-  set.seed(18293)
-  ## stepwise regression, direction = "backward"
-  fwd <- step(fm_full, 
-              trace = 1, 
-              direction = "forward")
+  # 4. Generate Plots
+  # Importance Plot
+  plots_importance_fw[[response]] <- ggplot(coef_df, aes(x = reorder(Predictor, Estimate), y = Estimate, fill = Direction)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    theme_minimal() +
+    labs(title = paste("FW Importance:", response), x = "Confounder", y = "Standardized Coefficient")
   
-  
-  fwd_coefs <- as.data.frame(fwd$coefficients)
-  
-  fwd_selected <- c()
-  
-  #Now we combined all variables that were selected
-  for (var in confs) {
-    if (var %in% substr(rownames(fwd_coefs),1,nchar(var))) {
-      fwd_selected <- c(fwd_selected, var)
-    }
-  }
-  
-  sum_fm_fw <- summary(fwd)
-  #The predicted values are generated
-  predict_fm_fw <- predict(fwd)
-  
-  #Below we calculate the R -suared value
-  #Second residual sum of squares
-  rss_fw <- sum((na.omit(response_fw_data[,c(response)])-predict_fm_fw)^2)
-  #R-squared
-  r_squared_fw <- 1-(rss_fw/tss)
-  #Percent variance explained
-  pve_fw <- r_squared_fw*100
-  
-  #We generate fields for the statistics
-  class(pve_fw) <- "numeric"
-  
-  #We input the percent variance explained into the data set
-  t1_data_fw$percent_variance_exp_fw[which(t1_data_fw$Outcome==response)] <- pve_fw
-  
-  #We pull out the coefficinets
-  coef_fm_fw <- as.data.frame(sum_fm_fw$coefficients)
-  
-  #We adjust the p-values
-  coef_fm_fw$padj <- p.adjust(coef_fm_fw$`Pr(>|t|)`, method="fdr")
-  
-  #Now we go through each predictor and pull out the coefficient in p-value 
-  for (pred in confs) {
-    #We pull the row in the coefficient data set (use substr because sometime strings are added)
-    coef_row <- which(substr(rownames(coef_fm_fw),1,nchar(pred))==pred)
-    #We not pull the row from the lm data set to put it in
-    stat_row <- which(as.character(t1_data_fw$Predictor)==pred & as.character(t1_data_fw$Outcome)==response)
-    #We add an if statemenbt to make sure we only add values when its ad 
-    
-    if (length(coef_row)==1 & length(stat_row)==1) {
-      #We pull out the p-value (and adjusted p-value)
-      t1_data_fw$pval[stat_row] <- coef_fm_fw$`Pr(>|t|)`[coef_row]
-      t1_data_fw$padj[stat_row] <- coef_fm_fw$padj[coef_row]
-      #We pull out the coefficient
-      t1_data_fw$coef[stat_row] <- coef_fm_fw$Estimate[coef_row]
-      
-      #Based on the direction we indicate if it is positive of negative
-      if (t1_data_fw$coef[stat_row]>0) {
-        t1_data_fw$sig[stat_row] <- "Positive"
-      } 
-      if (t1_data_fw$coef[stat_row]<0) {
-        t1_data_fw$sig[stat_row] <- "Negative"
-      } 
-      #If the p-value is below 0.05 we add a significance label 
-      if (t1_data_fw$pval[stat_row]<0.05) {
-        t1_data_fw$sig[stat_row] <- paste0(t1_data_fw$sig[stat_row], " (Significant)")
-      }
-      
-      
-      
-    }
-  }
-  
+  # Pred vs Obs Plot
+  pred_obs_df <- data.frame(Observed = test_df[[response]], Predicted = fw_preds)
+  plots_pred_obs_fw[[response]] <- ggplot(pred_obs_df, aes(x = Observed, y = Predicted)) +
+    geom_point(color = "darkgreen", alpha = 0.6) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    theme_classic() +
+    labs(title = paste("FW Pred vs Obs:", response), subtitle = paste("R2 =", round(tail(performance_fw$R2, 1), 3)))
 }
 
-
+# Display Performance
+print(performance_fw)
 ```
 
 #####Both
 
 ```{r}
-#We generate an linear mixed effects model data set with combinations of predtictors (confounders) and outomes (metabolic variables)
-t1_data_both <- unique(expand.grid(confs, met_vars))
+# Initialize results for this section
+performance_both <- data.frame()
+selection_data_both <- data.frame()
+plots_importance_both <- list()
+plots_pred_obs_both <- list()
 
-#We name the columns accordingly
-colnames(t1_data_both) <- c("Predictor","Outcome")
-
-#We generate fields for the statistics
-t1_data_both["pval"] <- NA #p-values for each predictor in the model of that metabolic outcome using a t-test
-t1_data_both["padj"] <- NA #FDR adjusted p-values across predictors
-t1_data_both["coef"] <- NA #coefficients for each predictor in the model of that metabolic outcome
-t1_data_both["sig"] <- NA #A significance field for the plot (ext showing if positive or negative and significant or not)
-t1_data_both["percent_variance_exp_original"] <- NA #Calucltaed percent variance explained
-t1_data_both["percent_variance_exp_both"] <- NA #Calucltaed percent variance explained
-
-#Now we go through each response and perform the backward selection
-for (response in met_vars){ 
+for (response in met_vars_log) {
+  # Pull the specific split for this response
+  train_df <- data_splits[[response]]$train
+  test_df  <- data_splits[[response]]$test
   
-  #We remove NA values 
-  response_both_data <- na.omit(base_t1[,c(confs,response,"PID")])
+  # 1. Fit the Model 
+  # Stepwise 'both' usually starts from a full or null model; 
+  # we'll start with full to allow for immediate subtraction/addition
+  full_formula <- as.formula(paste0(response, " ~ ."))
+  full_lm <- lm(full_formula, data = train_df)
   
-  #The full formala is created including all counfounders
-  ff_full <- as.formula(paste0(response,"~",paste0(confs, collapse="+"))) 
-  fm_full <- lm(ff_full,
-                data = response_both_data)
+  # Perform Stepwise Selection (Both directions)
+  both_model <- step(full_lm, direction = "both", trace = 0)
   
-  #Predicted values are generated for pve calulations
-  predict_fm <- predict(fm_full)
-  sum_fm <- summary(fm_full)
+  # 2. Predictions & Performance (Testing on holdout set)
+  both_preds <- predict(both_model, newdata = test_df)
+  performance_both <- rbind(performance_both, 
+                           get_metrics(test_df[[response]], both_preds, "Both", response))
   
-  #Below we calculate the R -suared value
-  #First total sum of squares
-  tss <- sum((unlist(na.omit(response_both_data[,c(response)]))-mean(unlist(na.omit(response_both_data[,c(response)]))))^2)
-  #Second residual sum of squares
-  rss <- sum((unlist(response_both_data[,c(response)])-predict_fm)^2)
-  #R-squared
-  r_squared <- 1-(rss/tss)
-  #Percent variance explained
-  pve <- r_squared*100
-  class(pve) <- "numeric"
+  # 3. Importance Data (Coefficients)
+  # Clean names to map 'GenderMale' -> 'Gender'
+  coef_raw <- as.data.frame(summary(both_model)$coefficients)
+  colnames(coef_raw) <- c("Estimate", "StdErr", "t_val", "p_val")
   
-  #We input the percent variance explained into the data set
-  t1_data_both$percent_variance_exp_original[which(t1_data_both$Outcome==response)] <- pve
+  coef_df <- coef_raw %>%
+    filter(rownames(.) != "(Intercept)") %>%
+    mutate(
+      Predictor = clean_pred_names(rownames(.), confs),
+      Outcome = response,
+      Direction = ifelse(Estimate > 0, "Positive", "Negative"),
+      Sig = ifelse(p_val < 0.05, "Significant", "Non-Sig")
+    )
+  selection_data_both <- rbind(selection_data_both, coef_df)
   
+  # 4. Generate Plots
+  # Importance Plot
+  plots_importance_both[[response]] <- ggplot(coef_df, aes(x = reorder(Predictor, Estimate), y = Estimate, fill = Direction)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    theme_minimal() +
+    labs(title = paste("Stepwise (Both) Importance:", response), x = "Confounder", y = "Standardized Coefficient")
   
-  ## stepwise regression, direction = "backward"
-  both <- step(fm_full, 
-              trace = 1, 
-              direction = "both")
-  
-  
-  both_coefs <- as.data.frame(both$coefficients)
-  
-  both_selected <- c()
-  
-  #Now we combined all variables that were selected
-  for (var in confs) {
-    if (var %in% substr(rownames(both_coefs),1,nchar(var))) {
-      both_selected <- c(both_selected, var)
-    }
-  }
-  
-  sum_fm_both <- summary(both)
-  #The predicted values are generated
-  predict_fm_both <- predict(both)
-  
-  #Below we calculate the R -suared value
-  #Second residual sum of squares
-  rss_both <- sum((na.omit(response_both_data[,c(response)])-predict_fm_both)^2)
-  #R-squared
-  r_squared_both <- 1-(rss_both/tss)
-  #Percent variance explained
-  pve_both <- r_squared_both*100
-  
-  #We generate fields for the statistics
-  class(pve_both) <- "numeric"
-  
-  #We input the percent variance explained into the data set
-  t1_data_both$percent_variance_exp_both[which(t1_data_both$Outcome==response)] <- pve_both
-  
-  #We pull out the coefficinets
-  coef_fm_both <- as.data.frame(sum_fm_both$coefficients)
-  
-  #We adjust the p-values
-  coef_fm_both$padj <- p.adjust(coef_fm_both$`Pr(>|t|)`, method="fdr")
-  
-  #Now we go through each predictor and pull out the coefficient in p-value 
-  for (pred in confs) {
-    #We pull the row in the coefficient data set (use substr because sometime strings are added)
-    coef_row <- which(substr(rownames(coef_fm_both),1,nchar(pred))==pred)
-    #We not pull the row from the lm data set to put it in
-    stat_row <- which(as.character(t1_data_both$Predictor)==pred & as.character(t1_data_both$Outcome)==response)
-    #We add an if statemenbt to make sure we only add values when its ad 
-    
-    if (length(coef_row)==1 & length(stat_row)==1) {
-      #We pull out the p-value (and adjusted p-value)
-      t1_data_both$pval[stat_row] <- coef_fm_both$`Pr(>|t|)`[coef_row]
-      t1_data_both$padj[stat_row] <- coef_fm_both$padj[coef_row]
-      #We pull out the coefficient
-      t1_data_both$coef[stat_row] <- coef_fm_both$Estimate[coef_row]
-      
-      #Based on the direction we indicate if it is positive of negative
-      if (t1_data_both$coef[stat_row]>0) {
-        t1_data_both$sig[stat_row] <- "Positive"
-      } 
-      if (t1_data_both$coef[stat_row]<0) {
-        t1_data_both$sig[stat_row] <- "Negative"
-      } 
-      #If the p-value is below 0.05 we add a significance label 
-      if (t1_data_both$pval[stat_row]<0.05) {
-        t1_data_both$sig[stat_row] <- paste0(t1_data_both$sig[stat_row], " (Significant)")
-      }
-      
-      
-      
-    }
-  }
-  
+  # Pred vs Obs Plot
+  pred_obs_df <- data.frame(Observed = test_df[[response]], Predicted = both_preds)
+  plots_pred_obs_both[[response]] <- ggplot(pred_obs_df, aes(x = Observed, y = Predicted)) +
+    geom_point(color = "purple", alpha = 0.6) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    theme_classic() +
+    labs(title = paste("Both Pred vs Obs:", response), subtitle = paste("R2 =", round(tail(performance_both$R2, 1), 3)))
 }
 
+# Display Performance
+print(performance_both)
 
 ```
 
-#### LASSO 
+###Lasso
 ```{r}
+# Initialize results for this section
+performance_lasso <- data.frame()
+selection_data_lasso <- data.frame()
+plots_importance_lasso <- list()
+plots_pred_obs_lasso <- list()
 
-#We generate an linear mixed effects model data set with combinations of predtictors (confounders) and outomes (metabolic variables)
-t1_data_lasso <- unique(expand.grid(confs, met_vars))
+# 1. Create master fold IDs outside the loop for 100% reproducibility
+# This ensures cv.glmnet uses the same data splits every time you run the code
+set.seed(527342)
+# We use a large number (1000) or nrow(data) to ensure we have enough IDs for any split
+fold_ids_master <- sample(rep(1:5, length.out = 2000)) 
 
-#We name the columns accordingly
-colnames(t1_data_lasso) <- c("Predictor","Outcome")
-
-#We generate fields for the statistics
-t1_data_lasso["pval"] <- NA #p-values for each predictor in the model of that metabolic outcome using a t-test
-t1_data_lasso["padj"] <- NA #FDR adjusted p-values across predictors
-t1_data_lasso["coef"] <- NA #coefficients for each predictor in the model of that metabolic outcome
-t1_data_lasso["sig"] <- NA #A significance field for the plot (ext showing if positive or negative and significant or not)
-t1_data_lasso["percent_variance_exp_original"] <- NA #Calucltaed percent variance explained
-t1_data_lasso["percent_variance_exp_lasso"] <- NA #Calucltaed percent variance explained
-t1_data_lasso["lambda"] <- NA #Lambda value used
-
-#lambda value sequences are pulled from for lasso
-lambda_seq <- 10^seq(2, -2, by = -.1)
-
-#Now we go through each response and perform the backward selection
-for (response in met_vars){ 
+for (response in met_vars_log) {
+  # Pull the specific split
+  train_df <- data_splits[[response]]$train
+  test_df  <- data_splits[[response]]$test
   
-  #We remove NA values 
-  response_lasso_data <- na.omit(base_t1[,c(confs,response,"PID")])
+  # Prepare matrices (Lasso requirement)
+  # We use the formula to ensure dummy coding matches the other models
+  x_train <- model.matrix(as.formula(paste(response, "~ .")), train_df)[,-1]
+  y_train <- train_df[[response]]
+  x_test  <- model.matrix(as.formula(paste(response, "~ .")), test_df)[,-1]
+  y_test  <- test_df[[response]]
   
-    #The full formala is created including all counfounders
-  ff_full <- as.formula(paste0(response,"~",paste0(confs, collapse="+"))) 
-  fm_full <- lm(ff_full,
-                data = response_lasso_data)
+  # Subset master folds to match the current training rows
+  current_fold_ids <- fold_ids_master[1:nrow(x_train)]
   
-  #Predicted values are generated for pve calulations
-  predict_fm <- predict(fm_full)
-  sum_fm <- summary(fm_full)
+  # 2. Fit LASSO with Cross-Validation using fixed folds
+  cv_lasso <- cv.glmnet(x_train, y_train, 
+                        alpha = 1, 
+                        foldid = current_fold_ids, 
+                        standardize = TRUE)
   
-  #Below we calculate the R -suared value
-  #First total sum of squares
-  tss <- sum((unlist(na.omit(response_lasso_data[,c(response)]))-mean(unlist(na.omit(response_lasso_data[,c(response)]))))^2)
-  #Second residual sum of squares
-  rss <- sum((unlist(response_lasso_data[,c(response)])-predict_fm)^2)
-  #R-squared
-  r_squared <- 1-(rss/tss)
-  #Percent variance explained
-  pve <- r_squared*100
-  class(pve) <- "numeric"
+  best_lam <- cv_lasso$lambda.min
   
-  #We input the percent variance explained into the data set
-  t1_data_lasso$percent_variance_exp_original[which(t1_data_lasso$Outcome==response)] <- pve
+  # 3. Extract selected variables
+  lasso_coefs <- coef(cv_lasso, s = "lambda.min")
+  selected_indices <- which(lasso_coefs != 0)[-1] # Exclude intercept
+  selected_vars_raw <- rownames(lasso_coefs)[selected_indices]
   
-  #lambda optimization
-  #x_vars and y_vars need to be formatted for LASSO
-  x_vars <- model.matrix(ff_full, response_lasso_data)[,-1]
-  
-
-  # Splitting the data into test and train
-  set.seed(8548396)
-  train = sample(1:nrow(x_vars), nrow(x_vars)/2)
-  x_test = (-train)
-  
-  cv_output <- cv.glmnet(x_vars[,], unlist(response_lasso_data[,response]),
-                       alpha = 1, lambda = lambda_seq, 
-                       nfolds = 5)
-  # identifying best lamda
-  best_lam <- cv_output$lambda.min
-  
-  t1_data_lasso$lambda[which(t1_data_lasso$Outcome==response)] <- best_lam
-  
-  # Rebuilding the model with best lamda value identified
-  lasso_best <- glmnet(x_vars[,], unlist(response_lasso_data[,response]),
-                       alpha = 1, lambda = best_lam)
-predict_fm_lasso <- predict(lasso_best, newx=x_vars[,])
-
-#predict_fm_lasso <- predict(lasso_best, s = best_lam, newx = x_vars[x_test,])
-
-
-  #Below we calculate the R -suared value
-  #Second residual sum of squares
-  rss_lasso <- sum((na.omit(response_lasso_data[,c(response)])-predict_fm_lasso)^2)
-  #R-squared
-  r_squared_lasso <- 1-(rss_lasso/tss)
-  #Percent variance explained
-  pve_lasso <- r_squared_lasso*100
-  
-  #We generate fields for the statistics
-  class(pve_lasso) <- "numeric"
-  
-  #We input the percent variance explained into the data set
-  t1_data_lasso$percent_variance_exp_lasso[which(t1_data_lasso$Outcome==response)] <- pve_lasso
-  
-  #We pull out the coefficinets
-  coef_fm_lasso <- coef(lasso_best)  
- 
-  lasso_vars_pre <- coef_fm_lasso@Dimnames[[1]][coef_fm_lasso@i]
-  
-  lasso_selected <- c()
-  
-  for (var in confs) {
-    if (var %in% substr(lasso_vars_pre,1,nchar(var))) {
-      lasso_selected <- c(lasso_selected, var)
-    }
-  }
-  
-  if (length(lasso_selected)!=0) {
- # create full model 
-  ff_lasso <- as.formula(paste0(response,"~",paste0(lasso_selected, collapse="+"))) 
-  fm_lasso <- lm(ff_lasso,
-             data = response_lasso_data)
-  
-  predict_fm_lasso <- predict(fm_lasso)
-  sum_fm_lasso <- summary(fm_lasso)
-  
-
-  #Below we calculate the R -suared value
-
-  #Second residual sum of squares
-  rss_lasso <- sum((na.omit(response_lasso_data[,c(response)])-predict_fm_lasso)^2)
-  #R-squared
-  r_squared_lasso <- 1-(rss_lasso/tss)
-  #Percent variance explained
-  pve_lasso <- r_squared_lasso*100
-  
-  #We generate fields for the statistics
-  t1_data_lasso$percent_variance_exp_lasso[which(t1_data_lasso$Outcome==response)] <- pve_lasso
-  
-  #We pull out the coefficinets
-  coef_fm_lasso <- as.data.frame(sum_fm_lasso$coefficients)
-  
-  #We do an FDR adjustment
-  coef_fm_lasso$padj <- p.adjust(coef_fm_lasso$`Pr(>|t|)`, method="fdr")
-  
-  
-  
-  #Now we go through each predictor and pull out the coefficient in p-value 
-  for (pred in confs) {
-    #We pull the row in the coefficient data set (use substr because sometime strings are added)
-    coef_row <- which(substr(rownames(coef_fm_lasso),1,nchar(pred))==pred)
-    #We not pull the row from the lm data set to put it in
-    stat_row <- which(as.character(t1_data_lasso$Predictor)==pred & as.character(t1_data_lasso$Outcome)==response)
-    #We add an if statemenbt to make sure we only add values when its ad 
+  # 4. Refit and Performance Logic
+  if(length(selected_vars_raw) > 0) {
     
-    if (length(coef_row)==1 & length(stat_row)==1) {
-      #We pull out the p-value and the adjusted pvalue  
-      t1_data_lasso$pval[stat_row] <- coef_fm_lasso$`Pr(>|t|)`[coef_row]
-      t1_data_lasso$padj[stat_row] <- coef_fm_lasso$padj[coef_row]
-      #We pull out the coefficient
-      t1_data_lasso$coef[stat_row] <- coef_fm_lasso$Estimate[coef_row]
+    # Create formula for refit
+    refit_formula <- as.formula(paste(response, "~", paste(selected_vars_raw, collapse = " + ")))
+    
+    # Explicitly build dataframes for the 'lm' refit to avoid 'object not found' errors
+    refit_train_df <- as.data.frame(x_train[, selected_vars_raw, drop = FALSE])
+    refit_train_df[[response]] <- y_train
+    
+    refit_test_df <- as.data.frame(x_test[, selected_vars_raw, drop = FALSE])
+    refit_test_df[[response]] <- y_test
+    
+    # Refit Linear Model
+    lasso_refit_model <- lm(refit_formula, data = refit_train_df)
+    
+    # 5. Predictions & Performance
+    lasso_preds <- predict(lasso_refit_model, newdata = refit_test_df)
+    performance_lasso <- rbind(performance_lasso, 
+                               get_metrics(y_test, lasso_preds, "Lasso", response))
+    
+    # 6. Importance Data (Coefficients)
+    coef_raw <- as.data.frame(summary(lasso_refit_model)$coefficients)
+    colnames(coef_raw) <- c("Estimate", "StdErr", "t_val", "p_val")
+    
+    coef_df <- coef_raw %>%
+      filter(rownames(.) != "(Intercept)") %>%
+      mutate(
+        Predictor = clean_pred_names(rownames(.), confs),
+        Outcome = response,
+        Direction = ifelse(Estimate > 0, "Positive", "Negative"),
+        Sig = ifelse(p_val < 0.05, "Significant", "Non-Sig")
+      )
+    selection_data_lasso <- rbind(selection_data_lasso, coef_df)
+    
+    # 7. Generate Plots
+    pred_obs_df <- data.frame(Observed = y_test, Predicted = as.vector(lasso_preds))
+    plots_pred_obs_lasso[[response]] <- ggplot(pred_obs_df, aes(x = Observed, y = Predicted)) +
+      geom_point(color = "darkorange", alpha = 0.6) +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+      theme_classic() +
+      labs(title = paste("Lasso Pred vs Obs:", response), 
+           subtitle = paste("R2 =", round(tail(performance_lasso$R2, 1), 3)))
       
-      #Based on the direction we indicate if it is positive of negative
-      if (t1_data_lasso$coef[stat_row]>0) {
-        t1_data_lasso$sig[stat_row] <- "Positive"
-      } 
-      if (t1_data_lasso$coef[stat_row]<0) {
-        t1_data_lasso$sig[stat_row] <- "Negative"
-      } 
-      if (t1_data_lasso$padj[stat_row]<0.05) {
-        t1_data_lasso$sig[stat_row] <- paste0(t1_data_lasso$sig[stat_row], " (Significant)")
-      }
-      
-      
-      
-    }
+  } else {
+  # Instead of just NA, calculate the error of the 'Mean' (Null Model)
+  null_rmse <- sqrt(mean((y_test - mean(y_train))^2))
+  null_mae <- mean(abs(y_test - mean(y_train)))
+  
+  performance_lasso <- rbind(performance_lasso, 
+                             data.frame(Outcome = response, Method = "Lasso", 
+                                        RMSE = null_rmse, MAE = null_mae, R2 = 0))
   }
-  
-  }
-  
-  
 }
 
-
+# Display Final reproducible results
+print(performance_lasso)
 
 ```
+
 
 #### VSURF
 ```{r}
-#We generate an linear mixed effects model data set with combinations of predtictors (confounders) and outomes (metabolic variables)
-t1_data_vsurf <- unique(expand.grid(confs, met_vars))
+# Initialize results for this section
+performance_vsurf <- data.frame()
+selection_data_vsurf <- data.frame()
+plots_importance_vsurf <- list()
+plots_pred_obs_vsurf <- list()
 
-#We name the columns accordingly
-colnames(t1_data_vsurf) <- c("Predictor","Outcome")
-
-#We generate fields for the statistics
-t1_data_vsurf["pval"] <- NA #p-values for each predictor in the model of that metabolic outcome using a t-test
-t1_data_vsurf["padj"] <- NA #FDR adjusted p-values across predictors
-t1_data_vsurf["coef"] <- NA #coefficients for each predictor in the model of that metabolic outcome
-t1_data_vsurf["sig"] <- NA #A significance field for the plot (ext showing if positive or negative and significant or not)
-t1_data_vsurf["percent_variance_exp_original"] <- NA #Calucltaed percent variance explained
-t1_data_vsurf["percent_variance_exp_vsurf"] <- NA #Calucltaed percent variance explained
-t1_data_vsurf["lambda"] <- NA #Lambda value used
-
-#lambda value sequences are pulled from for lasso
-lambda_seq <- 10^seq(2, -2, by = -.1)
-
-#Now we go through each response and perform the backward selection
-for (response in met_vars){ 
+for (response in met_vars_log) {
+  # 1. Pull the standardized split for this response
+  train_df <- data_splits[[response]]$train
+  test_df  <- data_splits[[response]]$test
   
-  #We remove NA values 
-  response_vsurf_data <- na.omit(base_t1[,c(confs,response,"PID")])
+  # VSURF works best with matrix inputs
+  x_train <- model.matrix(as.formula(paste(response, "~ .")), train_df)[,-1]
+  y_train <- train_df[[response]]
+  x_test  <- model.matrix(as.formula(paste(response, "~ .")), test_df)[,-1]
+  y_test  <- test_df[[response]]
   
-  #The full formala is created including all counfounders
-  ff_full <- as.formula(paste0(response,"~",paste0(confs, collapse="+"))) 
-  fm_full <- lm(ff_full,
-                data = response_vsurf_data)
+  # 2. Run VSURF (Prediction Step)
+  # CRITICAL: Move seed here and set parallel = FALSE for 100% reproducibility
+  set.seed(86) 
   
-  #Predicted values are generated for pve calulations
-  predict_fm <- predict(fm_full)
-  sum_fm <- summary(fm_full)
+  # Note: VSURF is computationally heavy; without parallel it may take a moment
+  vsurf_obj <- VSURF(x = x_train, y = y_train, parallel = FALSE, trace = FALSE)
   
-  #Below we calculate the R -suared value
-  #First total sum of squares
-  tss <- sum((unlist(na.omit(response_vsurf_data[,c(response)]))-mean(unlist(na.omit(response_vsurf_data[,c(response)]))))^2)
-  #Second residual sum of squares
-  rss <- sum((unlist(response_vsurf_data[,c(response)])-predict_fm)^2)
-  #R-squared
-  r_squared <- 1-(rss/tss)
-  #Percent variance explained
-  pve <- r_squared*100
-  class(pve) <- "numeric"
+  # varselect.pred contains the indices of variables for the prediction step
+  vsurf_indices <- vsurf_obj$varselect.pred
+  vsurf_vars_raw <- colnames(x_train)[vsurf_indices]
   
-  #We input the percent variance explained into the data set
-  t1_data_vsurf$percent_variance_exp_original[which(t1_data_vsurf$Outcome==response)] <- pve
-  
-  
-  # Splitting the data into test and train
-  set.seed(86)
-  vsurf <- VSURF(ff_full, data=response_vsurf_data)
-  
-  #We pull the selected variables 
-  vsurf_selected <- confs[vsurf$varselect.thres]
-  
-  
-  if (length(vsurf_selected)!=0) {
-    # create full model 
-    ff_vsurf <- as.formula(paste0(response,"~",paste0(vsurf_selected, collapse="+"))) 
-    fm_vsurf <- lm(ff_vsurf,
-                   data = response_vsurf_data)
+  if(length(vsurf_vars_raw) > 0) {
+    # 3. Refit Linear Model for P-values and Standardized Coefficients
+    refit_formula <- as.formula(paste(response, "~", paste(vsurf_vars_raw, collapse = " + ")))
     
-    predict_fm_vsurf <- predict(fm_vsurf)
-    sum_fm_vsurf <- summary(fm_vsurf)
+    # Create temp dataframes from matrices for the lm refit
+    # Use drop = FALSE to ensure it remains a matrix even if only 1 variable is selected
+    refit_train <- as.data.frame(x_train[, vsurf_vars_raw, drop = FALSE])
+    refit_train[[response]] <- y_train
     
+    refit_test <- as.data.frame(x_test[, vsurf_vars_raw, drop = FALSE])
+    # We don't necessarily need y_test in refit_test for predict(), but it's safe
     
-    #Below we calculate the R -suared value
+    vsurf_refit_model <- lm(refit_formula, data = refit_train)
     
-    #Second residual sum of squares
-    rss_vsurf <- sum((na.omit(response_vsurf_data[,c(response)])-predict_fm_vsurf)^2)
-    #R-squared
-    r_squared_vsurf <- 1-(rss_vsurf/tss)
-    #Percent variance explained
-    pve_vsurf <- r_squared_vsurf*100
+    # 4. Predictions & Performance (Testing on holdout set)
+    vsurf_preds <- predict(vsurf_refit_model, newdata = refit_test)
+    performance_vsurf <- rbind(performance_vsurf, 
+                               get_metrics(y_test, vsurf_preds, "VSURF", response))
     
-    #We generate fields for the statistics
-    t1_data_vsurf$percent_variance_exp_vsurf[which(t1_data_vsurf$Outcome==response)] <- pve_vsurf
+    # 5. Importance Data (Coefficients)
+    coef_raw <- as.data.frame(summary(vsurf_refit_model)$coefficients)
+    colnames(coef_raw) <- c("Estimate", "StdErr", "t_val", "p_val")
     
-    #We pull out the coefficinets
-    coef_fm_vsurf <- as.data.frame(sum_fm_vsurf$coefficients)
+    coef_df <- coef_raw %>%
+      filter(rownames(.) != "(Intercept)") %>%
+      mutate(
+        Predictor = clean_pred_names(rownames(.), confs),
+        Outcome = response,
+        Direction = ifelse(Estimate > 0, "Positive", "Negative"),
+        Sig = ifelse(p_val < 0.05, "Significant", "Non-Sig")
+      )
+    selection_data_vsurf <- rbind(selection_data_vsurf, coef_df)
     
-    #We do an FDR adjustment
-    coef_fm_vsurf$padj <- p.adjust(coef_fm_vsurf$`Pr(>|t|)`, method="fdr")
+    # 6. Generate Plots
+    # Importance Plot
+    plots_importance_vsurf[[response]] <- ggplot(coef_df, aes(x = reorder(Predictor, Estimate), y = Estimate, fill = Direction)) +
+      geom_bar(stat = "identity") +
+      coord_flip() +
+      theme_minimal() +
+      labs(title = paste("VSURF Importance:", response), x = "Confounder", y = "Standardized Coefficient")
     
-    
-    
-    #Now we go through each predictor and pull out the coefficient in p-value 
-    for (pred in confs) {
-      #We pull the row in the coefficient data set (use substr because sometime strings are added)
-      coef_row <- which(substr(rownames(coef_fm_vsurf),1,nchar(pred))==pred)
-      #We not pull the row from the lm data set to put it in
-      stat_row <- which(as.character(t1_data_vsurf$Predictor)==pred & as.character(t1_data_vsurf$Outcome)==response)
-      #We add an if statemenbt to make sure we only add values when its ad 
+    # Pred vs Obs Plot
+    pred_obs_df <- data.frame(Observed = y_test, Predicted = as.vector(vsurf_preds))
+    plots_pred_obs_vsurf[[response]] <- ggplot(pred_obs_df, aes(x = Observed, y = Predicted)) +
+      geom_point(color = "firebrick", alpha = 0.6) +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+      theme_classic() +
+      labs(title = paste("VSURF Pred vs Obs:", response), 
+           subtitle = paste("Test R2 =", round(tail(performance_vsurf$R2, 1), 3)))
       
-      if (length(coef_row)==1 & length(stat_row)==1) {
-        #We pull out the p-value and the adjusted pvalue  
-        t1_data_vsurf$pval[stat_row] <- coef_fm_vsurf$`Pr(>|t|)`[coef_row]
-        t1_data_vsurf$padj[stat_row] <- coef_fm_vsurf$padj[coef_row]
-        #We pull out the coefficient
-        t1_data_vsurf$coef[stat_row] <- coef_fm_vsurf$Estimate[coef_row]
-        
-        #Based on the direction we indicate if it is positive of negative
-        if (t1_data_vsurf$coef[stat_row]>0) {
-          t1_data_vsurf$sig[stat_row] <- "Positive"
-        } 
-        if (t1_data_vsurf$coef[stat_row]<0) {
-          t1_data_vsurf$sig[stat_row] <- "Negative"
-        } 
-        if (t1_data_vsurf$padj[stat_row]<0.05) {
-          t1_data_vsurf$sig[stat_row] <- paste0(t1_data_vsurf$sig[stat_row], " (Significant)")
-        }
-        
-        
-        
-      }
-    }
-    
+  } else {
+    # 7. Null Model Logic: Calculate the error of the 'Mean' if no vars selected
+    # This prevents the NA values in your Panel B
+    null_rmse <- sqrt(mean((y_test - mean(y_train))^2))
+    null_mae <- mean(abs(y_test - mean(y_train)))
+  
+    performance_vsurf <- rbind(performance_vsurf, 
+                               data.frame(Outcome = response, Method = "VSURF", 
+                                          RMSE = null_rmse, MAE = null_mae, R2 = 0))
   }
-  
-  
-}
-```
-
-
-### Dot Plots
-
-```{r}
-
-#Backward Selection
-
-#We filter to only include selected variables
-t1_data_bw_selected <- t1_data_bw[which(!is.na(t1_data_bw$coef)),]
-
-t1_plot_bw <- ggplot(t1_data_bw_selected, aes(x = Predictor, y = Outcome, color=sig)) +
-  scale_color_manual(values=c("lightblue","blue","pink","red"))+
-  geom_point(size=5) +
-  theme_minimal() +
-  labs(x = "Plasma Measure", y = " ", fill=" ", tag="A", title="Backward Selection") +
-  theme_classic() +
-  guides(color = guide_legend(ncol = 2))+
-  theme(legend.position = "bottom",
-        legend.title = element_blank(),
-        legend.text = element_text(size = 12),
-        axis.text.y = element_text(size=12),
-        axis.title.y = element_blank(),
-        axis.title.x = element_blank(),
-        axis.text.x = element_text(size = 12, angle=45, hjust=1),
-        strip.text.x = element_text(size=15),
-        strip.text.y = element_text(size=15),
-        title = element_text(size=20),
-        plot.tag = element_text(size=25))
-
-
-##Forward Selection
-#We filter to only include selected variables
-t1_data_fw_selected <- t1_data_fw[which(!is.na(t1_data_fw$coef)),]
-
-t1_plot_fw <- ggplot(t1_data_fw_selected, aes(x = Predictor, y = Outcome, color=sig)) +
-  scale_color_manual(values=c("lightblue","blue","pink","red"))+
-  geom_point(size=5) +
-  theme_minimal() +
-  labs(x = "Plasma Measure", y = " ", fill=" ", tag="B", title="Forward Selection") +
-  theme_classic() +
-  guides(color = guide_legend(ncol = 2))+
-  theme(legend.position = "bottom",
-        legend.title = element_blank(),
-        legend.text = element_text(size = 12),
-        axis.text.y = element_text(size=12),
-        axis.title.y = element_blank(),
-        axis.title.x = element_blank(),
-        axis.text.x = element_text(size = 12, angle=45, hjust=1),
-        strip.text.x = element_text(size=15),
-        strip.text.y = element_text(size=15),
-        title = element_text(size=20),
-        plot.tag = element_text(size=25))
-
-#Both Selection
-
-#We filter to only include selected variables
-t1_data_both_selected <- t1_data_both[which(!is.na(t1_data_both$coef)),]
-
-t1_plot_both <- ggplot(t1_data_both_selected, aes(x = Predictor, y = Outcome, color=sig)) +
-  scale_color_manual(values=c("lightblue","blue","pink","red"))+
-  geom_point(size=5) +
-  theme_minimal() +
-  labs(x = "Plasma Measure", y = " ", fill=" ", tag="C", title="Both  Selection") +
-  theme_classic() +
-  guides(color = guide_legend(ncol = 2))+
-  theme(legend.position = "bottom",
-        legend.title = element_blank(),
-        legend.text = element_text(size = 12),
-        axis.text.y = element_text(size=12),
-        axis.title.y = element_blank(),
-        axis.title.x = element_blank(),
-        axis.text.x = element_text(size = 12, angle=45, hjust=1),
-        strip.text.x = element_text(size=15),
-        strip.text.y = element_text(size=15),
-        title = element_text(size=20),
-        plot.tag = element_text(size=25))
-
-
-#We filter to only include selected variables
-t1_data_lasso_selected <- t1_data_lasso[which(!is.na(t1_data_lasso$coef)),]
-
-t1_plot_lasso <- ggplot(t1_data_lasso_selected, aes(x = Predictor, y = Outcome, color=sig)) +
-  scale_color_manual(values=c("lightblue","blue","pink","red"))+
-  geom_point(size=5) +
-  theme_minimal() +
-  labs(x = "Plasma Measure", y = " ", fill=" ", tag="C", title="LASSO") +
-  theme_classic() +
-  guides(color = guide_legend(ncol = 2))+
-  theme(legend.position = "bottom",
-        legend.title = element_blank(),
-        legend.text = element_text(size = 12),
-        axis.text.y = element_text(size=12),
-        axis.title.y = element_blank(),
-        axis.title.x = element_blank(),
-        axis.text.x = element_text(size = 12, angle=45, hjust=1),
-        strip.text.x = element_text(size=15),
-        strip.text.y = element_text(size=15),
-        title = element_text(size=20),
-        plot.tag = element_text(size=25))
-
-
-#We filter to only include selected variables
-t1_data_vsurf_selected <- t1_data_vsurf[which(!is.na(t1_data_vsurf$coef)),]
-
-t1_plot_vsurf <- ggplot(t1_data_vsurf_selected, aes(x = Predictor, y = Outcome, color=sig)) +
-  scale_color_manual(values=c("lightblue","blue","pink","red"))+
-  geom_point(size=5) +
-  theme_minimal() +
-  labs(x = "Plasma Measure", y = " ", fill=" ", tag="D", title="VSURF") +
-  theme_classic() +
-  guides(color = guide_legend(ncol = 2))+
-  theme(legend.position = "bottom",
-        legend.title = element_blank(),
-        legend.text = element_text(size = 12),
-        axis.text.y = element_text(size=12),
-        axis.title.y = element_blank(),
-        axis.title.x = element_blank(),
-        axis.text.x = element_text(size = 12, angle=45, hjust=1),
-        strip.text.x = element_text(size=15),
-        strip.text.y = element_text(size=15),
-        title = element_text(size=20),
-        plot.tag = element_text(size=25))
-
-
-
-
-ggarrange(t1_plot_bw, t1_plot_fw, t1_plot_lasso, t1_plot_vsurf, nrow=2, ncol=2, common.legend=TRUE, legend="bottom")
-```
-
-###ADONIS
-```{r}
-
-#First just the metabolic markers are selected 
-#NA values removed
-non_NA_rows <- which(!is.na(rowSums(base_t1[,met_vars])))
-met_ord_data <- base_t1[non_NA_rows,met_vars]
-#clinical variables are defined as well
-met_conf_data <- base_t1[non_NA_rows,confs]
-
-
-#Distance matrix is generated using the vegdist function
-met_ord_dist <- vegdist(met_ord_data, method="euclidean", na.rm=TRUE, scale=TRUE)
-
-#Adonis data set is generated
-adonis_results <- unique(expand.grid(confs))
-adonis_results["pval"] <- NA
-colnames(adonis_results) <- c("Confounder","pval")
-
-#Then for each varaible we perform an ADONIS
-for (r in 1:nrow(adonis_results)) {
-  var_v <- adonis_results$Confounder[r]
-  adonis_formula_v <- as.formula(paste0("met_ord_dist~",var_v)) 
-  adonis_v <- adonis2(adonis_formula_v,data=met_conf_data, method="euclidean")
-  pval_v <- adonis_v$`Pr(>F)`[1]
-  adonis_results$pval[r] <- pval_v
 }
 
-#A significance field is created with asterisks
-adonis_results$p.signif <- add_asterisks(adonis_results$pval)
-
-#Results are printed
-print(adonis_results)
+# Display Performance
+print(performance_vsurf)
 ```
+
+
+
+### Condolidate all Results
+
+First, we combine the selection_data from all five methods into one "Master Selection" data frame.
+
+```{r}
+# Combine all selection data
+master_selection <- bind_rows(
+  selection_data_bw %>% mutate(Method = "Backward"),
+#  selection_data_fw %>% mutate(Method = "Forward"),
+  selection_data_both %>% mutate(Method = "Both"),
+  selection_data_lasso %>% mutate(Method = "Lasso"),
+  selection_data_vsurf %>% mutate(Method = "VSURF")
+)
+
+# Create a complete grid of all possible combinations 
+# This ensures that "unselected" variables show up as gray tiles
+complete_grid <- expand.grid(
+  Predictor = confs,
+  Outcome = met_vars_log,
+  Method = c("Backward", "Forward", "Both", "Lasso", "VSURF")
+)
+
+# 1. Prepare the data with outline logic
+plot_tile_data <- complete_grid %>%
+  left_join(master_selection, by = c("Predictor", "Outcome", "Method")) %>%
+  mutate(
+    # Create the outline type
+    Outline_Type = case_when(
+      Sig == "Significant" ~ "Solid (p < 0.05)",
+      !is.na(Estimate) ~ "Dashed (Selected)",
+      TRUE ~ "None"
+    ),
+    # Ensure Method factor order
+    Method = factor(Method, levels = rev(c("Backward", "Forward", "Both", "Lasso", "VSURF"))),
+    # Convert Method to numeric for geom_rect positioning
+    y_idx = as.numeric(Method)
+  )
+
+# Ensure your factor levels for Predictor are identical across all data
+plot_tile_data <- plot_tile_data %>%
+  mutate(Predictor = factor(Predictor, levels = confs))
+
+plot_tile_data$DisplayOutcome <- gsub("_log","",
+plot_tile_data$Outcome) 
+
+plot_tile_data$DisplayOutcome <- gsub("Trig","Triglycerides",
+plot_tile_data$DisplayOutcome) 
+
+plot_tile_data$DisplayOutcome <- gsub("DL","DL-C",
+plot_tile_data$DisplayOutcome) 
+
+
+conf_heatmap <- ggplot(plot_tile_data, aes(x = Predictor, y = Method)) +
+  # 1. The Background Fill (Continuous Scale)
+  geom_tile(aes(fill = Estimate), color = "white") +
+  
+  # 2. The SIGNIFICANT Outlines (Solid Black)
+  # We filter the data inside the geom so it only draws where p < 0.05
+  geom_tile(data = filter(plot_tile_data, Sig == "Significant"),
+            fill = NA, color = "black", size = 0.8, linetype = "solid") +
+  
+  # 3. The SELECTED (but non-sig) Outlines (Dashed Black)
+  geom_tile(data = filter(plot_tile_data, !is.na(Estimate) & Sig != "Significant"),
+            fill = NA, color = "black", size = 0.5, linetype = "dashed") +
+
+  # Continuous Color Scale
+  scale_fill_gradient2(low = "#e34a33", mid = "white", high = "#2b8cbe", 
+                       midpoint = 0, na.value = "#f0f0f0",
+                       name = "Coefficient Weight") +
+                       
+  facet_grid(DisplayOutcome ~ ., scales = "free_y", space = "free_y") +
+  theme_minimal() +
+  labs(
+    title = "Confounder Selection Landscape",
+    x = "Potential Confounders",
+    y = "Selection Method",
+    tag="A"
+  ) +
+  theme(
+    axis.text.x = element_text(size=15, angle = 45, hjust = 1),
+    axis.text.y= element_text(size=15),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    title=element_text(size=20),
+    legend.title = element_text(size=15),
+    strip.text.y = element_text(size=15, angle = 0, face = "bold"),
+    panel.spacing = unit(0.5, "lines"),
+    plot.tag = element_text(size=25),
+    legend.position = "right",
+    panel.grid = element_blank()
+  )
+
+# Combine all performance summaries
+master_performance <- bind_rows(
+  performance_bw, 
+  performance_fw, 
+  performance_both, 
+  performance_lasso, 
+  performance_vsurf
+)
+
+# Apply the same display cleaning as Panel A
+master_performance <- master_performance %>%
+  mutate(
+    DisplayOutcome = gsub("_log", "", Outcome),
+    DisplayOutcome = gsub("Trig", "Triglycerides", DisplayOutcome),
+    DisplayOutcome = gsub("DL", "DL-C", DisplayOutcome),
+    # Match the Y-axis factor levels exactly
+    Method = factor(Method, levels = rev(c("Backward", "Forward", "Both", "Lasso", "VSURF")))
+  )
+
+
+# Format the performance data for the table plot
+performance_table_data <- master_performance %>%
+  mutate(
+    # Match Panel A naming
+    DisplayOutcome = gsub("_log", "", Outcome),
+    DisplayOutcome = gsub("Trig", "Triglycerides", DisplayOutcome),
+    DisplayOutcome = gsub("DL", "DL-C", DisplayOutcome),
+    # Match Y-axis factor levels
+    Method = factor(Method, levels = rev(c("Backward", "Forward", "Both", "Lasso", "VSURF"))),
+    # Format numbers for display
+    R2_txt = sprintf("%.3f", R2),
+    RMSE_txt = sprintf("%.3f", RMSE),
+    MAE_txt = sprintf("%.3f", MAE)
+  ) %>%
+  # Reshape to long format so we can plot RMSE, MAE, and R2 side-by-side
+  pivot_longer(cols = c(R2_txt, RMSE_txt, MAE_txt), 
+               names_to = "Metric", 
+               values_to = "Value") %>%
+  mutate(Metric = factor(Metric, levels = c("R2_txt", "RMSE_txt", "MAE_txt"),
+                         labels = c("R2", "RMSE", "MAE")))
+
+# 1. Identify the best R2 per outcome for highlighting
+performance_table_data <- performance_table_data %>%
+  group_by(DisplayOutcome, Metric) %>%
+  mutate(
+    is_best = ifelse(Metric == "R2" & Value == max(Value), "bold", "plain")
+  ) %>%
+  ungroup()
+
+# 2. Build the Table Plot
+conf_table <- ggplot(performance_table_data, aes(x = Metric, y = Method, label = Value)) +
+  # Use aes(fontface = is_best) to highlight the top performers
+  geom_text(aes(fontface = is_best), size = 5) +
+  
+  facet_grid(DisplayOutcome ~ ., scales = "free_y", space = "free_y") +
+  
+  # Move X axis labels to the top
+  scale_x_discrete(position = "top") +
+  
+  theme_minimal() +
+  labs(
+    title = "Model Performance",
+    x = NULL,
+    y = NULL,
+    tag = "B"
+  ) +
+  theme(
+    # Repeated Y axis labels
+    axis.text.y = element_text(size = 15), 
+    axis.ticks.y = element_blank(),
+    
+    # Top-aligned X axis labels
+    axis.text.x = element_text(size = 15, face = "bold"),
+    
+    # Facet labels
+    strip.text.y = element_text(size = 15, angle = 0, face = "bold"), 
+    
+    panel.grid = element_blank(),
+    plot.tag = element_text(size = 25),
+    panel.spacing = unit(0.5, "lines"),
+    
+    # FIXED: Explicitly calling ggplot2::margin to avoid the 'observed' error
+    plot.title = element_text(size = 20, hjust = 0.5, 
+                             margin = ggplot2::margin(b = 20))
+  )
+
+library(patchwork)
+
+# Assuming your first plot is saved as 'panel_a'
+# We use widths to give the Heatmap (A) more space than the Performance (B)
+conf_ab <- conf_heatmap + conf_table + 
+  plot_layout(widths = c(2, 1))
+
+```
+
 
 ###Final Confounders Saved
 ```{r}
-#All counfounders
-conf_vars_all <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05)])
 
 #Confounders for specific variables 
-conf_vars_HDL <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05 & t1_data_bw_selected$Outcome=="HDL")])
-conf_vars_LDL <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05 & t1_data_bw_selected$Outcome=="LDL")])
-conf_vars_Trig <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05 & t1_data_bw_selected$Outcome=="Trig")])
-conf_vars_Glucose <- as.character(t1_data_bw_selected$Predictor[which(t1_data_bw_selected$padj<0.05 & t1_data_bw_selected$Outcome=="Glucose")])
-
-conf_vars <- list(conf_vars_all=conf_vars_all,
-                  conf_vars_HDL=conf_vars_HDL,
+conf_vars_HDL <- as.character(plot_tile_data$Predictor[which(!is.na(plot_tile_data$Sig) & plot_tile_data$Outcome=="HDL_log" & plot_tile_data$Method=="VSURF")])
+conf_vars_LDL <- as.character(plot_tile_data$Predictor[which(!is.na(plot_tile_data$Sig) & plot_tile_data$Outcome=="LDL_log" & plot_tile_data$Method=="VSURF")])
+conf_vars_Trig <- as.character(plot_tile_data$Predictor[which(!is.na(plot_tile_data$Sig) & plot_tile_data$Outcome=="Trig_log" & plot_tile_data$Method=="Both")]) 
+conf_vars_Glucose <- as.character(plot_tile_data$Predictor[which(!is.na(plot_tile_data$Sig) & plot_tile_data$Outcome=="Glucose_log" & plot_tile_data$Method=="Both")]) 
+conf_vars <- list(conf_vars_HDL=conf_vars_HDL,
                   conf_vars_LDL=conf_vars_LDL,
                   conf_vars_Trig=conf_vars_Trig,
                   conf_vars_Glucose=conf_vars_Glucose)
@@ -967,30 +851,189 @@ saveRDS(conf_vars, file = "../../Data/R_Data/conf_vars.RDS")
 ```
 
 
-###Final Plot Edits and Save
+
+
+###PCoA and ADONIS
 ```{r}
-# First I use them same color scheme as described in Zim1 
-cohortColors <- palette(brewer.pal(n = 5, name = "BrBG"))
-cohortColors <- palette(brewer.pal(n = 5, name = "BrBG")) #Repeated to solidify? 
+# --- 1. Data Preparation & Distance Matrix ---
+non_NA_rows  <- which(!is.na(rowSums(base_t1_model[, met_vars_log])))
+met_ord_data <- base_t1_model[non_NA_rows, met_vars_log]
+met_conf_data <- base_t1_model[non_NA_rows, confs]
 
-#Figure 1A will be the backward selection figure (X and Y values changed)
+met_ord_dist <- vegdist(met_ord_data, method = "euclidean", na.rm = TRUE, scale = TRUE)
 
-#"-C" added to low and high density lipoportein
+# --- 2. ADONIS (Permutational MANOVA) ---
+adonis_results <- data.frame(Confounder = confs, pval = NA)
 
-t1_data_bw_selected$DisplayOutcome <- gsub("DL","DL-C", t1_data_bw_selected$Outcome)
-t1_data_bw_selected$DisplayOutcome <- gsub("Trig","Triglycerides", t1_data_bw_selected$DisplayOutcome)
-#Now we add the percent variance explained
-t1_data_bw_selected$DisplayOutcome <- paste0(t1_data_bw_selected$DisplayOutcome, " (",round(t1_data_bw_selected$percent_variance_exp_bw,1),"% exp)")
+for (r in 1:nrow(adonis_results)) {
+  var_v <- adonis_results$Confounder[r]
+  formula_v <- as.formula(paste0("met_ord_dist ~ ", var_v))
+  adonis_v <- adonis2(formula_v, data = met_conf_data, method = "euclidean")
+  adonis_results$pval[r] <- adonis_v$`Pr(>F)`[1]
+}
 
+adonis_results$p.signif <- add_asterisks(adonis_results$pval)
+sig_confs <- adonis_results$Confounder[adonis_results$pval < 0.05]
 
-BW_Selection_Plot <- ggplot(t1_data_bw_selected, aes(y = Predictor, x = DisplayOutcome, color=sig)) +
-  scale_color_manual(values=c("lightblue","blue","pink","red"))+
-  geom_point(size=5) +
+# --- 3. PCoA Calculation ---
+pcoa_res <- cmdscale(met_ord_dist, k = 2, eig = TRUE)
+var_exp  <- round(pcoa_res$eig / sum(pcoa_res$eig) * 100, 1)
+
+pcoa_df  <- data.frame(
+  Axis1 = pcoa_res$points[, 1],
+  Axis2 = pcoa_res$points[, 2],
+  met_conf_data
+)
+
+# --- 4. Panel C: Metabolic Loading Biplot (Hollow Circles) ---
+fit <- envfit(pcoa_res, met_ord_data, na.rm = TRUE)
+arrows <- as.data.frame(scores(fit, display = "vectors"))
+arrows$Variable <- rownames(arrows)
+
+arrows <- arrows %>%
+  mutate(
+    DisplayVariable = gsub("_log", "", Variable),
+    DisplayVariable = gsub("Trig", "Triglycerides", DisplayVariable),
+    DisplayVariable = gsub("DL", "DL-C", DisplayVariable)
+  )
+
+conf_biplot <- ggplot() +
+  # Using shape 21 with fill = NA creates the "uncovered" hollow circle effect
+  geom_point(data = pcoa_df, aes(x = Axis1, y = Axis2), 
+             shape = 21, color = "gray", fill = "gray", stroke = 0.5, size = 1.5) +
+  
+  # Vector arrows (scaled by 500 for visibility)
+  geom_segment(data = arrows, 
+               aes(x = 0, y = 0, xend = .6*Dim1, yend = .6*Dim2),
+               arrow = arrow(length = unit(0.2, "cm")), 
+               color = "black", linewidth = 0.8) +
+  
+  geom_text(data = arrows, 
+            aes(x = .6*(Dim1+.2), y = .6*Dim2, label = DisplayVariable), 
+            vjust = -0.5, hjust = 1.1, fontface = "bold", size = 5) +
+  
   theme_minimal() +
-  labs(y = "Plasma Measure", x = " ", fill=" ", tag="A", title="Backward Selection") +
-  theme_classic() +
-  guides(color = guide_legend(ncol = 2))+
-  theme(legend.position = "bottom",
+  labs(
+    title = "Metabolic Loading Biplot",
+    x = paste0("PCoA1 (", var_exp[1], "%)"),
+    y = paste0("PCoA2 (", var_exp[2], "%)"),
+    tag = "C"
+  ) +
+  theme(
+    axis.text = element_text(size = 15),
+    axis.title = element_text(size = 15),
+    title = element_text(size = 20),
+    plot.tag = element_text(size = 25),
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA)
+  )
+
+# --- 5. Panel D: Significant ADONIS Color Grid ---
+plot_list <- list()
+
+for (i in 1:length(sig_confs)) {
+  v <- sig_confs[i]
+  is_num <- is.numeric(pcoa_df[[v]])
+  
+  p <- ggplot(pcoa_df, aes(x = Axis1, y = Axis2)) +
+    geom_point(aes(color = .data[[v]]), alpha = 0.7, size = 2) +
+    theme_minimal() +
+    labs(
+      title = paste("Colored by:", v),
+      x = if (i == length(sig_confs)) paste0("PCoA1 (", var_exp[1], "%)") else NULL,
+      y = paste0("PCoA2 (", var_exp[2], "%)")
+    ) +
+    theme(
+      axis.text = element_text(size = 12),
+      axis.title = element_text(size = 15),
+      title = element_text(size = 15),
+      legend.title = element_text(size = 12),
+      panel.grid = element_blank(),
+      panel.border = element_rect(color = "grey80", fill = NA)
+    )
+  
+  if (is_num) {
+    p <- p + scale_color_viridis_c()
+  } else {
+    p <- p + scale_color_brewer(palette = "Set1")
+  }
+  
+  plot_list[[v]] <- p
+}
+
+conf_adonis_plot <- wrap_plots(plot_list, ncol = 1) + 
+  plot_annotation(tag_levels = list(c("D"))) & 
+  theme(plot.tag = element_text(size = 25))
+
+# --- 6. Final Layout Composition ---
+conf_cd <- conf_biplot + conf_adonis_plot + 
+  plot_layout(widths = c(2, 1))
+
+print(conf_cd)
+
+```
+
+
+
+
+###Final Plots Saved
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# 1. Create a mapping with the clean labels you want for the X-axis
+winning_mapping <- data.frame(
+  Outcome = c("HDL_log", "LDL_log", "Trig_log", "Glucose_log"),
+  MethodLabel = c("HDL-C (VSURF)", "LDL-C (VSURF)", "Triglycerides (Stepwise)", "Glucose (Stepwise)"),
+  WinningMethod = c("VSURF", "VSURF", "Both", "Both")
+)
+
+# 2. Process the data
+fig1a_data <- plot_tile_data %>%
+  inner_join(winning_mapping, by = c("Outcome", "Method" = "WinningMethod")) %>%
+  filter(!is.na(Estimate)) %>%
+  mutate(
+    Point_Cat = case_when(
+      Estimate > 0 & Sig == "Significant" ~ "Positive (Significant)",
+      Estimate > 0 & Sig != "Significant" ~ "Positive",
+      Estimate < 0 & Sig == "Significant" ~ "Negative (Significant)",
+      Estimate < 0 & Sig != "Significant" ~ "Negative"
+    ),
+    Point_Cat = factor(Point_Cat, levels = c(
+      "Positive (Significant)", "Positive", 
+      "Negative (Significant)", "Negative"
+    ))
+  )
+
+
+# 3. Create the Plot with X and Y swapped
+conf_dotplot_final <- ggplot(fig1a_data, aes(x = MethodLabel, y = Predictor)) +
+  # Background grid lines to help eye alignment
+  geom_hline(yintercept = seq_along(levels(factor(fig1a_data$Predictor))), 
+             color = "grey90", linetype = "dotted") +
+  
+  # The Dots
+  geom_point(aes(color = Point_Cat), size = 7) +
+  
+  # Color Palette
+  scale_color_manual(
+    values = c(
+      "Positive (Significant)" = "red", # Solid Red
+      "Positive"       = "pink", # Light Red
+      "Negative (Significant)" = "darkblue", # Solid Blue
+      "Negative"       = "lightblue"  # Light Blue
+    ),
+    name = "Selection Type"
+  ) +
+  
+  theme_minimal() +
+  labs(
+    title = "Confounder Selection",
+    x = "Metabolic Outcome (Selected via Approach)",
+    y = "Potential Confounders",
+    tag = "A"
+  ) +
+theme(legend.position = "right",
         legend.title = element_blank(),
         legend.text = element_text(size = 12),
         axis.text.y = element_text(size=12),
@@ -1002,193 +1045,23 @@ BW_Selection_Plot <- ggplot(t1_data_bw_selected, aes(y = Predictor, x = DisplayO
         title = element_text(size=20),
         plot.tag = element_text(size=25))
 
-saveRDS(BW_Selection_Plot, file = "../../Figures/Panels/FIG1A.RDS")
+print(conf_dotplot_final)
+# Combine all panels into a single row
+# Layout: [Heatmap A] [Table B] [Biplot C] [ADONIS D]
+conf_final_row <- conf_heatmap + conf_table + conf_biplot + conf_adonis_plot + 
+  plot_layout(
+    nrow = 1, 
+    widths = c(2, 1, 3, 1) # Adjusts relative space for wider panels A & C
+  )
 
-#Age Scatter plots
-#LDL and Age
-Glucose_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=Glucose, fill=Cohort)) +
-            geom_line(aes(group=PID), alpha=0.3)+
-            geom_point(shape=21, size=3, stroke=1) + 
-        scale_y_log10()+
-        scale_fill_manual(values=c(cohortColors[1],
-                                   "gray",
-                                   cohortColors[5]))+
-  scale_color_manual(values=c(cohortColors[1],
-                                   "gray",
-                                   cohortColors[5]))+
-        scale_color_identity() +
-    geom_smooth(aes(x=base_t1$Visit_Age, y=base_t1$Glucose), 
-                method="lm", se=TRUE, inherit.aes=FALSE) +
-        theme_bw() +
-        labs(y="Glucose (mg/dL)",x="Age (years)", tag="B") +
-        theme(legend.position = "bottom",
-              legend.text = element_text(size=15),
-              legend.title = element_blank(),
-          axis.text.x = element_text(size = 12),
-          axis.title.y = element_text(size=15),
-          axis.title.x = element_text(size=15),
-          axis.text.y = element_text(size = 12),
-          strip.text.x = element_text(size=12),
-          strip.text.y = element_text(size=10),
-          plot.tag = element_text(size=25),
-          ggh4x.facet.nestline = element_blank(),
-          strip.background.x = element_rect(
-            color="black", fill="gray", linetype="solid"
-          ),
-          strip.background.y = element_rect(
-            color="black", fill="gray", linetype="solid"
-        ))
+# Print the final figure
+print(conf_final_row)
+#The plot is saved
 
-saveRDS(Glucose_Age_Plot, file = "../../Figures/Panels/FIGS1B.RDS")
+saveRDS(conf_final_row, file = "../../Figures/Panels/ConfFig.RDS")
 
+saveRDS(conf_dotplot_final, file = "../../Figures/Panels/FIG1A.RDS")
 
-
-
-
-#LDL and Age
-LDL_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=LDL, fill=Cohort)) +
-            geom_line(aes(group=PID), alpha=0.3)+
-            geom_point(shape=21, size=3, stroke=1) + 
-        scale_y_log10()+
-        scale_fill_manual(values=c(cohortColors[1],
-                                   "gray",
-                                   cohortColors[5]))+
-  scale_color_manual(values=c(cohortColors[1],
-                                   "gray",
-                                   cohortColors[5]))+
-        scale_color_identity() +
-    geom_smooth(aes(x=base_t1$Visit_Age, y=base_t1$LDL), 
-                method="lm", se=TRUE, inherit.aes=FALSE) +
-        theme_bw() +
-        labs(y="LDL-C (mg/dL)",x="Age (years)", tag="C") +
-        theme(legend.position = "bottom",
-              legend.text = element_text(size=15),
-              legend.title = element_blank(),
-          axis.text.x = element_text(size = 12),
-          axis.title.y = element_text(size=15),
-          axis.title.x = element_text(size=15),
-          axis.text.y = element_text(size = 12),
-          strip.text.x = element_text(size=12),
-          strip.text.y = element_text(size=10),
-          plot.tag = element_text(size=25),
-          ggh4x.facet.nestline = element_blank(),
-          strip.background.x = element_rect(
-            color="black", fill="gray", linetype="solid"
-          ),
-          strip.background.y = element_rect(
-            color="black", fill="gray", linetype="solid"
-        ))
-
-saveRDS(LDL_Age_Plot, file = "../../Figures/Panels/FIGS1C.RDS")
-
-#Triglycerides and Age
-Trig_Age_Plot <- ggplot(data=base_t1, mapping=aes(x=Visit_Age, y=Trig, fill=Cohort)) +
-            geom_line(aes(group=PID), alpha=0.3)+
-            geom_point(shape=21, size=3, stroke=1) + 
-        scale_y_log10()+
-        scale_fill_manual(values=c(cohortColors[1],
-                                   "gray",
-                                   cohortColors[5]))+
-  scale_color_manual(values=c(cohortColors[1],
-                                   "gray",
-                                   cohortColors[5]))+
-        scale_color_identity() +
-    geom_smooth(aes(x=base_t1$Visit_Age, y=base_t1$Trig), 
-                method="lm", se=TRUE, inherit.aes=FALSE) +
-        theme_bw() +
-        labs(y="Triglycerides (mg/dL)",x="Age (years)", tag="D") +
-        theme(legend.position = "bottom",
-              legend.text = element_text(size=15),
-              legend.title = element_blank(),
-          axis.text.x = element_text(size = 12),
-          axis.title.y = element_text(size=15),
-          axis.title.x = element_text(size=15),
-          axis.text.y = element_text(size = 12),
-          strip.text.x = element_text(size=12),
-          strip.text.y = element_text(size=10),
-          plot.tag = element_text(size=25),
-          ggh4x.facet.nestline = element_blank(),
-          strip.background.x = element_rect(
-            color="black", fill="gray", linetype="solid"
-          ),
-          strip.background.y = element_rect(
-            color="black", fill="gray", linetype="solid"
-        ))
-
-saveRDS(Trig_Age_Plot, file = "../../Figures/Panels/FIGS1D.RDS")
-
-
-#Grain Scatter Plot
-#Trig and Grain
-Trig_Grain_Plot <- ggplot(data=base_t1, mapping=aes(x=Total_Grain, y=Trig, fill=Cohort)) +
-            geom_line(aes(group=PID), alpha=0.3)+
-            geom_point(shape=21, size=3, stroke=1) + 
-        scale_y_log10()+
-        scale_fill_manual(values=c(cohortColors[1],
-                                   "gray",
-                                   cohortColors[5]))+
-  scale_color_manual(values=c(cohortColors[1],
-                                   "gray",
-                                   cohortColors[5]))+
-        scale_color_identity() +
-    geom_smooth(aes(x=base_t1$Total_Grain, y=base_t1$Trig), 
-                method="lm", se=TRUE, inherit.aes=FALSE) +
-        theme_bw() +
-        labs(y="Triglycerides (mg/dL)",x="Total Grain", tag="D") +
-        theme(legend.position = "bottom",
-              legend.text = element_text(size=15),
-              legend.title = element_blank(),
-          axis.text.x = element_text(size = 12),
-          axis.title.y = element_text(size=15),
-          axis.title.x = element_text(size=15),
-          axis.text.y = element_text(size = 12),
-          strip.text.x = element_text(size=12),
-          strip.text.y = element_text(size=10),
-          plot.tag = element_text(size=25),
-          ggh4x.facet.nestline = element_blank(),
-          strip.background.x = element_rect(
-            color="black", fill="gray", linetype="solid"
-          ),
-          strip.background.y = element_rect(
-            color="black", fill="gray", linetype="solid"
-        ))+
-  facet_nested(rows=vars(Cohort))
-
-#Fast Food Plot
-#Glucose and Fast Food
-Glucose_Fast_Food_Plot <- ggplot(data=base_t1, mapping=aes(x=Total_Fast_Food, y=Glucose, fill=Cohort)) +
-            geom_line(aes(group=PID), alpha=0.3)+
-            geom_point(shape=21, size=3, stroke=1) + 
-        scale_y_log10()+
-        scale_fill_manual(values=c(cohortColors[1],
-                                   "gray",
-                                   cohortColors[5]))+
-  scale_color_manual(values=c(cohortColors[1],
-                                   "gray",
-                                   cohortColors[5]))+
-        scale_color_identity() +
-    geom_smooth(aes(x=base_t1$Total_Fast_Food, y=base_t1$Glucose), 
-                method="lm", se=TRUE, inherit.aes=FALSE) +
-        theme_bw() +
-        labs(y="Gucose (mg/dL)",x="Glucose Grain", tag="D") +
-        theme(legend.position = "bottom",
-              legend.text = element_text(size=15),
-              legend.title = element_blank(),
-          axis.text.x = element_text(size = 12),
-          axis.title.y = element_text(size=15),
-          axis.title.x = element_text(size=15),
-          axis.text.y = element_text(size = 12),
-          strip.text.x = element_text(size=12),
-          strip.text.y = element_text(size=10),
-          plot.tag = element_text(size=25),
-          ggh4x.facet.nestline = element_blank(),
-          strip.background.x = element_rect(
-            color="black", fill="gray", linetype="solid"
-          ),
-          strip.background.y = element_rect(
-            color="black", fill="gray", linetype="solid"
-        ))+
-  facet_nested(rows=vars(Cohort))
 
 ```
 

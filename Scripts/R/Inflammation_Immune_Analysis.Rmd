@@ -339,6 +339,356 @@ inf_plot <- ggplot(inf_lm_data, aes(x = Predictor, y = DisplayOutcome, color=sig
 
 ```
 
+
+#### Machine Learning
+
+#####Data processing and splitting
+```{r}
+
+base$CRP <- as.numeric(base$CRP_mg_L)
+base$IL6 <- as.numeric(base$`IL-6_pg_mL`)
+
+# --- 1. Initialize inf_ Storage Objects ---
+inf_ml_ready_data <- list()
+inf_results_full <- list()
+inf_vif_reports <- list()
+
+# --- 2. Main Data Processing Loop (Using Original inf_vars) ---
+for (response in met_vars) {
+  
+  # A. Setup Variables
+  inf_conf_r <- get(paste0("conf_vars_", response))
+  inf_all_preds <- c(inf_vars, inf_conf_r) # Starting with full original list
+  
+  # B. Build Working Dataset
+  inf_required_vars <- c("PID", response, inf_all_preds)
+  inf_data_subset <- base[, inf_required_vars]
+  
+  # C. Clean and Transform
+  inf_data_subset <- na.omit(inf_data_subset)
+  inf_log_name <- paste0("Log", response)
+  inf_data_subset[[inf_log_name]] <- log10(as.numeric(inf_data_subset[[response]]))
+  inf_data_subset <- inf_data_subset[is.finite(inf_data_subset[[inf_log_name]]), ]
+  
+  # D. Scale Numerical Predictors
+  inf_num_vars <- inf_all_preds[sapply(inf_data_subset[inf_all_preds], is.numeric)]
+  inf_data_subset[inf_num_vars] <- lapply(inf_data_subset[inf_num_vars], function(x) as.numeric(scale(x)))
+  
+  # E. Bivariate Association Analysis (Collinearity Check)
+  inf_cat_preds <- inf_all_preds[sapply(inf_data_subset[inf_all_preds], is.factor) | 
+                                   sapply(inf_data_subset[inf_all_preds], is.character)]
+  inf_num_preds <- inf_all_preds[sapply(inf_data_subset[inf_all_preds], is.numeric)]
+  
+  inf_biv_results <- list()
+  
+  # Numerical vs Numerical (Spearman)
+  if(length(inf_num_preds) > 1) {
+    inf_num_combos <- expand.grid(V1 = inf_num_preds, V2 = inf_num_preds, stringsAsFactors = FALSE) %>%
+      filter(V1 < V2)
+    inf_biv_results$num_num <- apply(inf_num_combos, 1, function(row) {
+      test <- cor.test(inf_data_subset[[row[1]]], inf_data_subset[[row[2]]], method = "spearman", exact = FALSE)
+      data.frame(Var1 = row[1], Var2 = row[2], Stat = test$estimate, p_val = test$p.value, Type = "Num-Num")
+    }) %>% bind_rows()
+  }
+  
+  # Categorical associations
+  if(length(inf_cat_preds) > 1) {
+    inf_cat_combos <- expand.grid(V1 = inf_cat_preds, V2 = inf_cat_preds, stringsAsFactors = FALSE) %>% filter(V1 < V2)
+    inf_biv_results$cat_cat <- apply(inf_cat_combos, 1, function(row) {
+      inf_tab <- table(inf_data_subset[[row[1]]], inf_data_subset[[row[2]]])
+      if(nrow(inf_tab) > 1 & ncol(inf_tab) > 1) {
+        inf_chi_test <- chisq.test(inf_tab)
+        data.frame(Var1 = row[1], Var2 = row[2], Stat = NA, p_val = inf_chi_test$p.value, Type = "Cat-Cat")
+      }
+    }) %>% bind_rows()
+  }
+  
+  # F. Data Split (80/20 by PID)
+  set.seed(123)
+  inf_data_split <- group_initial_split(inf_data_subset, group = PID, prop = 0.8)
+  inf_train_df <- training(inf_data_split)
+  inf_test_df  <- testing(inf_data_split)
+  
+  # G. Final Formula and Storage
+  inf_ff <- as.formula(paste0(inf_log_name, " ~ ", paste(inf_all_preds, collapse = " + "), " + (1|PID)"))
+  
+  inf_ml_ready_data[[response]] <- list(
+    data_subset = inf_data_subset,
+    train = inf_train_df,
+    test = inf_test_df,
+    formula = inf_ff,
+    warnings = bind_rows(inf_biv_results) %>% filter(p_val < 0.05)
+  )
+  
+  message(paste0("inf_Ready: ", response, " | Training PIDs: ", length(unique(inf_train_df$PID))))
+}
+
+# --- 3. VIF Diagnostics (Check for High-Collinearity) ---
+for (response in met_vars) {
+  inf_vif_fit <- lmer(inf_ml_ready_data[[response]]$formula, 
+                      data = inf_ml_ready_data[[response]]$data_subset)
+  
+  message(paste0("\n--- VIF Report for ", response, " ---"))
+  print(car::vif(inf_vif_fit))
+}
+
+# --- 4. Manual Adjustment: Define inf_vars_reduced based on above VIF ---
+# Now that we've seen the "fights", we prune the list manually
+inf_vars_reduced <- c(
+  "CRP",
+  "IL6"
+)
+
+```
+
+#####Linear models with All
+```{r}
+library(lme4)
+library(performance)
+library(ggplot2)
+library(Metrics)
+library(dplyr)
+
+# Initialize storage with inf_ prefix
+inf_model_performance_table <- data.frame()
+inf_prediction_plots <- list()
+inf_importance_plots <- list()
+inf_ml_final_fits <- list()
+
+for (response in met_vars) {
+  
+  # 1. Setup variables and data
+  conf_r <- get(paste0("conf_vars_", response))
+  all_preds <- c(inf_vars_reduced, conf_r)
+  
+  # Pulling from the previously prepared list
+  train_df <- inf_ml_ready_data[[response]]$train
+  test_df  <- inf_ml_ready_data[[response]]$test
+  log_out  <- paste0("Log", response)
+  
+  # 2. Fit Mixed Effects Model (Training Set)
+  inf_formula <- as.formula(paste0(log_out, " ~ ", 
+                                   paste(all_preds, collapse = " + "), 
+                                   " + (1|PID)"))
+  
+  inf_fit <- lmer(inf_formula, data = train_df)
+  inf_ml_final_fits[[response]] <- inf_fit
+  
+  # 3. Predict on Test Set & Calculate Error
+  inf_preds <- predict(inf_fit, newdata = test_df, allow.new.levels = TRUE)
+  inf_actuals <- test_df[[log_out]]
+  
+  # 4. Extract Metrics
+  inf_r2_vals  <- performance::r2(inf_fit)
+  inf_rmse_val <- Metrics::rmse(inf_actuals, inf_preds)
+  inf_mae_val  <- Metrics::mae(inf_actuals, inf_preds)
+  inf_vif_val  <- max(car::vif(inf_fit))
+  
+  # 5. Build inf_ Performance Table
+  inf_model_performance_table <- rbind(inf_model_performance_table, data.frame(
+    Outcome = response,
+    Marginal_R2 = inf_r2_vals$R2_marginal,
+    Conditional_R2 = inf_r2_vals$R2_conditional,
+    RMSE = inf_rmse_val,
+    MAE = inf_mae_val,
+    Max_VIF = inf_vif_val
+  ))
+  
+  # 6. Generate Plot 1: inf_Observed vs Predicted
+  inf_plot_df <- data.frame(Obs = inf_actuals, Pred = inf_preds)
+  inf_p1 <- ggplot(inf_plot_df, aes(x = Obs, y = Pred)) +
+    geom_point(alpha = 0.5, color = "steelblue") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "darkred") +
+    labs(title = paste("inf_", response, "Validation"),
+         subtitle = paste("Test RMSE:", round(inf_rmse_val, 3)),
+         x = "Observed (Log)", y = "Predicted (Log)") +
+    theme_minimal()
+  
+  inf_prediction_plots[[response]] <- inf_p1
+  
+  # 7. Generate Plot 2: inf_Importance (Ordered by AbsT, Colored by Estimate)
+  inf_importance_df <- as.data.frame(summary(inf_fit)$coefficients) %>%
+    filter(row.names(.) != "(Intercept)") %>%
+    mutate(
+      Variable = row.names(.),
+      AbsT = abs(`t value`),
+      Estimate = Estimate,
+      # Pull p-value (it's the 5th column in lmerTest summary output)
+      P_Val = `Pr(>|t|)`,
+      # Create Asterisk Labels based on significance
+      Signif_Label = case_when(
+        P_Val < 0.001 ~ "***",
+        P_Val < 0.01  ~ "**",
+        P_Val < 0.05  ~ "*",
+        TRUE ~ "" # No label if p >= 0.05
+      )
+    ) %>%
+    arrange(desc(AbsT))
+  
+  inf_p2 <- ggplot(inf_importance_df, aes(x = reorder(Variable, AbsT), y = AbsT, fill = Estimate)) +
+    geom_bar(stat = "identity") +
+    # Add the asterisk labels just above the bars
+    geom_text(aes(label = Signif_Label), 
+              hjust = -0.2,            # Position slightly to the right of the bar
+              vjust = 0.8,             # Center vertically relative to bar height
+              color = "black", 
+              size = 5) +
+    coord_flip() +
+    scale_fill_gradient2(low = "firebrick3", mid = "snow2", high = "dodgerblue4", 
+                         midpoint = 0, name = "Beta Direction") +
+    # Expand the y-axis (which is x-axis after coord_flip) to make room for asterisks
+    scale_y_continuous(expand = expansion(mult = c(0, 0.15))) + 
+    labs(title = paste(response, "Importance in All Participants"),
+         x = NULL, 
+         y = "Absolute T-Statistic") +
+    theme_minimal() +
+    theme(legend.position = "right")
+  
+  inf_importance_plots[[response]] <- inf_p2
+  
+  message(paste0("inf_Success: Model and plots generated for ", response))
+}
+
+# Final Output display
+print(inf_model_performance_table)
+```
+
+#####Linear model with Naive
+```{r}
+library(lme4)
+library(performance)
+library(ggplot2)
+library(Metrics)
+library(dplyr)
+
+# Initialize storage with _naive suffix
+inf_model_performance_table_naive <- data.frame()
+inf_prediction_plots_naive <- list()
+inf_importance_plots_naive <- list()
+inf_ml_final_fits_naive <- list()
+
+# Define the Naive subset: HIV negative and no Treatment
+# Adjust the filter logic if your category labels are named differently (e.g., 0 or "Negative")
+base_naive <- base %>% filter(HIV_Status == "Negative" & Treatment == "No")
+
+for (response in met_vars) {
+  
+  # 1. Setup variables and data
+  conf_r <- get(paste0("conf_vars_", response))
+  
+  # REMOVE HIV_Status and Treatment from confounders for this group
+  conf_r_naive <- conf_r[!conf_r %in% c("HIV_Status", "Treatment")]
+  
+  all_preds_naive <- c(inf_vars_reduced, conf_r_naive)
+  
+  # We re-run the cleaning/log/scale logic specifically for this subset
+  # to ensure scaling is relative to the Naive group distribution
+  log_out <- paste0("Log", response)
+  
+  required_vars <- c("PID", response, all_preds_naive)
+  data_subset_naive <- na.omit(base_naive[, required_vars])
+  data_subset_naive[[log_out]] <- log10(as.numeric(data_subset_naive[[response]]))
+  data_subset_naive <- data_subset_naive[is.finite(data_subset_naive[[log_out]]), ]
+  
+  # Scaling
+  num_preds <- all_preds_naive[sapply(data_subset_naive[all_preds_naive], is.numeric)]
+  data_subset_naive[num_preds] <- lapply(data_subset_naive[num_preds], function(x) as.numeric(scale(x)))
+  
+  # 2. Split Data (80/20 by PID)
+  set.seed(123)
+  split_naive <- group_initial_split(data_subset_naive, group = PID, prop = 0.8)
+  train_naive <- training(split_naive)
+  test_naive  <- testing(split_naive)
+  
+  # 3. Fit Mixed Effects Model
+  formula_naive <- as.formula(paste0(log_out, " ~ ", 
+                                     paste(all_preds_naive, collapse = " + "), 
+                                     " + (1|PID)"))
+  
+  fit_naive <- lmer(formula_naive, data = train_naive)
+  inf_ml_final_fits_naive[[response]] <- fit_naive
+  
+  # 4. Predict and Evaluate
+  preds_naive <- predict(fit_naive, newdata = test_naive, allow.new.levels = TRUE)
+  actuals_naive <- test_naive[[log_out]]
+  
+  r2_naive   <- performance::r2(fit_naive)
+  rmse_naive <- Metrics::rmse(actuals_naive, preds_naive)
+  mae_naive  <- Metrics::mae(actuals_naive, preds_naive)
+  vif_naive  <- max(car::vif(fit_naive))
+  
+  # 5. Build Performance Table
+  inf_model_performance_table_naive <- rbind(inf_model_performance_table_naive, data.frame(
+    Outcome = response,
+    Marginal_R2 = r2_naive$R2_marginal,
+    Conditional_R2 = r2_naive$R2_conditional,
+    RMSE = rmse_naive,
+    MAE = mae_naive,
+    Max_VIF = vif_naive
+  ))
+  
+  # 6. Plot: Observed vs Predicted
+  p1_naive <- ggplot(data.frame(Obs = actuals_naive, Pred = preds_naive), aes(x = Obs, y = Pred)) +
+    geom_point(alpha = 0.5, color = "darkgreen") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "darkred") +
+    labs(title = paste(response, "(Naive): Validation"),
+         subtitle = paste("Test RMSE:", round(rmse_naive, 3)),
+         x = "Observed (Log)", y = "Predicted (Log)") +
+    theme_minimal()
+  
+  inf_prediction_plots_naive[[response]] <- p1_naive
+  
+  library(lmerTest) # Ensure this is loaded to get p-values from lmer
+  
+  # --- Inside your for (response in met_vars) loop ---
+  
+  # 7. Generate Plot 2: inf_Importance (Ordered by AbsT, Colored by Estimate)
+  importance_df_naive <- as.data.frame(summary(fit_naive)$coefficients) %>%
+    filter(row.names(.) != "(Intercept)") %>%
+    mutate(
+      Variable = row.names(.),
+      AbsT = abs(`t value`),
+      Estimate = Estimate,
+      # Pull p-value (it's the 5th column in lmerTest summary output)
+      P_Val = `Pr(>|t|)`,
+      # Create Asterisk Labels based on significance
+      Signif_Label = case_when(
+        P_Val < 0.001 ~ "***",
+        P_Val < 0.01  ~ "**",
+        P_Val < 0.05  ~ "*",
+        TRUE ~ "" # No label if p >= 0.05
+      )
+    ) %>%
+    arrange(desc(AbsT))
+  
+  p2_naive <- ggplot(importance_df_naive, aes(x = reorder(Variable, AbsT), y = AbsT, fill = Estimate)) +
+    geom_bar(stat = "identity") +
+    # Add the asterisk labels just above the bars
+    geom_text(aes(label = Signif_Label), 
+              hjust = -0.2,            # Position slightly to the right of the bar
+              vjust = 0.8,             # Center vertically relative to bar height
+              color = "black", 
+              size = 5) +
+    coord_flip() +
+    scale_fill_gradient2(low = "firebrick3", mid = "snow2", high = "dodgerblue4", 
+                         midpoint = 0, name = "Beta Direction") +
+    # Expand the y-axis (which is x-axis after coord_flip) to make room for asterisks
+    scale_y_continuous(expand = expansion(mult = c(0, 0.15))) + 
+    labs(title = paste(response, " Importance in Naive Group"),
+         x = NULL, 
+         y = "Absolute T-Statistic") +
+    theme_minimal() +
+    theme(legend.position = "right")
+  
+  inf_importance_plots_naive[[response]] <- p2_naive
+  
+  message(paste0("Naive Group Success: ", response))
+}
+
+print(inf_model_performance_table_naive)
+```
+
+
 #### Linear Mixed Effects Models  - Naive Participants
 ```{r}
 
@@ -459,6 +809,8 @@ inf_plot_naive <- ggplot(inf_lm_data_naive, aes(x = Predictor, y = DisplayOutcom
 
 
 ```
+
+
 
 
 #### IL-6 Mediation DAG
@@ -1093,6 +1445,366 @@ imm_plot_naive <- ggplot(imm_lm_data_naive, aes(x = Predictor, y = DisplayOutcom
 
 ```
 
+
+
+#### Machine Learning
+
+#####Data processing and splitting
+```{r}
+
+
+# --- 1. Initialize imm_ Storage Objects ---
+imm_ml_ready_data <- list()
+imm_results_full <- list()
+imm_vif_reports <- list()
+
+# --- 2. Main Data Processing Loop (Using Original imm_vars) ---
+for (response in met_vars) {
+  
+  # A. Setup Variables
+  imm_conf_r <- get(paste0("conf_vars_", response))
+  imm_all_preds <- c(imm_vars, imm_conf_r) # Starting with full original list
+  
+  # B. Build Working Dataset
+  imm_required_vars <- c("PID", response, imm_all_preds)
+  imm_data_subset <- base[, imm_required_vars]
+  
+  # C. Clean and Transform
+  imm_data_subset <- na.omit(imm_data_subset)
+  imm_log_name <- paste0("Log", response)
+  imm_data_subset[[imm_log_name]] <- log10(as.numeric(imm_data_subset[[response]]))
+  imm_data_subset <- imm_data_subset[is.finite(imm_data_subset[[imm_log_name]]), ]
+  
+  # D. Scale Numerical Predictors
+  imm_num_vars <- imm_all_preds[sapply(imm_data_subset[imm_all_preds], is.numeric)]
+  imm_data_subset[imm_num_vars] <- lapply(imm_data_subset[imm_num_vars], function(x) as.numeric(scale(x)))
+  
+  # E. Bivariate Association Analysis (Collinearity Check)
+  imm_cat_preds <- imm_all_preds[sapply(imm_data_subset[imm_all_preds], is.factor) | 
+                                 sapply(imm_data_subset[imm_all_preds], is.character)]
+  imm_num_preds <- imm_all_preds[sapply(imm_data_subset[imm_all_preds], is.numeric)]
+  
+  imm_biv_results <- list()
+  
+  # Numerical vs Numerical (Spearman)
+  if(length(imm_num_preds) > 1) {
+    imm_num_combos <- expand.grid(V1 = imm_num_preds, V2 = imm_num_preds, stringsAsFactors = FALSE) %>%
+      filter(V1 < V2)
+    imm_biv_results$num_num <- apply(imm_num_combos, 1, function(row) {
+      test <- cor.test(imm_data_subset[[row[1]]], imm_data_subset[[row[2]]], method = "spearman", exact = FALSE)
+      data.frame(Var1 = row[1], Var2 = row[2], Stat = test$estimate, p_val = test$p.value, Type = "Num-Num")
+    }) %>% bind_rows()
+  }
+  
+  # Categorical associations
+  if(length(imm_cat_preds) > 1) {
+    imm_cat_combos <- expand.grid(V1 = imm_cat_preds, V2 = imm_cat_preds, stringsAsFactors = FALSE) %>% filter(V1 < V2)
+    imm_biv_results$cat_cat <- apply(imm_cat_combos, 1, function(row) {
+      imm_tab <- table(imm_data_subset[[row[1]]], imm_data_subset[[row[2]]])
+      if(nrow(imm_tab) > 1 & ncol(imm_tab) > 1) {
+        imm_chi_test <- chisq.test(imm_tab)
+        data.frame(Var1 = row[1], Var2 = row[2], Stat = NA, p_val = imm_chi_test$p.value, Type = "Cat-Cat")
+      }
+    }) %>% bind_rows()
+  }
+
+  # F. Data Split (80/20 by PID)
+  set.seed(123)
+  imm_data_split <- group_initial_split(imm_data_subset, group = PID, prop = 0.8)
+  imm_train_df <- training(imm_data_split)
+  imm_test_df  <- testing(imm_data_split)
+  
+  # G. Final Formula and Storage
+  imm_ff <- as.formula(paste0(imm_log_name, " ~ ", paste(imm_all_preds, collapse = " + "), " + (1|PID)"))
+  
+  imm_ml_ready_data[[response]] <- list(
+    data_subset = imm_data_subset,
+    train = imm_train_df,
+    test = imm_test_df,
+    formula = imm_ff,
+    warnings = bind_rows(imm_biv_results) %>% filter(p_val < 0.05)
+  )
+  
+  message(paste0("imm_Ready: ", response, " | Training PIDs: ", length(unique(imm_train_df$PID))))
+}
+
+# --- 3. VIF Diagnostics (Check for High-Collinearity) ---
+for (response in met_vars) {
+  imm_vif_fit <- lmer(imm_ml_ready_data[[response]]$formula, 
+                      data = imm_ml_ready_data[[response]]$data_subset)
+  
+  message(paste0("\n--- VIF Report for ", response, " ---"))
+  print(car::vif(imm_vif_fit))
+}
+
+# --- 4. Manual Adjustment: Define imm_vars_reduced based on above VIF ---
+# Now that we've seen the "fights", we prune the list manually
+imm_vars_reduced <- c(
+  "CD14_Intermediate_Monocytes_Percent", 
+  "CD14_Classical_HLADR_Percent",
+  "CD14_Classical_PD1_Percent",
+  "CD14_Intermediate_HLADR_Percent",
+  "CD14_Intermediate_PD1_Percent",
+  "CD3_Percent",
+  "CD4_Percent", 
+  "CD4_CD103_Percent",
+  "CD4_PD1_Percent",
+  "CD4_HLADRpos_CD38pos_Percent",
+  "CD8_CD103_Percent",
+  "CD8_PD1_Percent",
+  "CD8_HLADRpos_CD38pos_Percent"
+)
+
+```
+
+#####Linear models with All
+```{r}
+library(lme4)
+library(performance)
+library(ggplot2)
+library(Metrics)
+library(dplyr)
+
+# Initialize storage with imm_ prefix
+imm_model_performance_table <- data.frame()
+imm_prediction_plots <- list()
+imm_importance_plots <- list()
+imm_ml_final_fits <- list()
+
+for (response in met_vars) {
+  
+  # 1. Setup variables and data
+  conf_r <- get(paste0("conf_vars_", response))
+  all_preds <- c(imm_vars_reduced, conf_r)
+  
+  # Pulling from the previously prepared list
+  train_df <- imm_ml_ready_data[[response]]$train
+  test_df  <- imm_ml_ready_data[[response]]$test
+  log_out  <- paste0("Log", response)
+  
+  # 2. Fit Mixed Effects Model (Training Set)
+  imm_formula <- as.formula(paste0(log_out, " ~ ", 
+                                    paste(all_preds, collapse = " + "), 
+                                    " + (1|PID)"))
+  
+  imm_fit <- lmer(imm_formula, data = train_df)
+  imm_ml_final_fits[[response]] <- imm_fit
+  
+  # 3. Predict on Test Set & Calculate Error
+  imm_preds <- predict(imm_fit, newdata = test_df, allow.new.levels = TRUE)
+  imm_actuals <- test_df[[log_out]]
+  
+  # 4. Extract Metrics
+  imm_r2_vals  <- performance::r2(imm_fit)
+  imm_rmse_val <- Metrics::rmse(imm_actuals, imm_preds)
+  imm_mae_val  <- Metrics::mae(imm_actuals, imm_preds)
+  imm_vif_val  <- max(car::vif(imm_fit))
+  
+  # 5. Build imm_ Performance Table
+  imm_model_performance_table <- rbind(imm_model_performance_table, data.frame(
+    Outcome = response,
+    Marginal_R2 = imm_r2_vals$R2_marginal,
+    Conditional_R2 = imm_r2_vals$R2_conditional,
+    RMSE = imm_rmse_val,
+    MAE = imm_mae_val,
+    Max_VIF = imm_vif_val
+  ))
+  
+  # 6. Generate Plot 1: imm_Observed vs Predicted
+  imm_plot_df <- data.frame(Obs = imm_actuals, Pred = imm_preds)
+  imm_p1 <- ggplot(imm_plot_df, aes(x = Obs, y = Pred)) +
+    geom_point(alpha = 0.5, color = "steelblue") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "darkred") +
+    labs(title = paste("imm_", response, "Validation"),
+         subtitle = paste("Test RMSE:", round(imm_rmse_val, 3)),
+         x = "Observed (Log)", y = "Predicted (Log)") +
+    theme_minimal()
+  
+  imm_prediction_plots[[response]] <- imm_p1
+  
+ # 7. Generate Plot 2: imm_Importance (Ordered by AbsT, Colored by Estimate)
+imm_importance_df <- as.data.frame(summary(imm_fit)$coefficients) %>%
+  filter(row.names(.) != "(Intercept)") %>%
+  mutate(
+    Variable = row.names(.),
+    AbsT = abs(`t value`),
+    Estimate = Estimate,
+    # Pull p-value (it's the 5th column in lmerTest summary output)
+    P_Val = `Pr(>|t|)`,
+    # Create Asterisk Labels based on significance
+    Signif_Label = case_when(
+      P_Val < 0.001 ~ "***",
+      P_Val < 0.01  ~ "**",
+      P_Val < 0.05  ~ "*",
+      TRUE ~ "" # No label if p >= 0.05
+    )
+  ) %>%
+  arrange(desc(AbsT))
+
+imm_p2 <- ggplot(imm_importance_df, aes(x = reorder(Variable, AbsT), y = AbsT, fill = Estimate)) +
+  geom_bar(stat = "identity") +
+  # Add the asterisk labels just above the bars
+  geom_text(aes(label = Signif_Label), 
+            hjust = -0.2,            # Position slightly to the right of the bar
+            vjust = 0.8,             # Center vertically relative to bar height
+            color = "black", 
+            size = 5) +
+  coord_flip() +
+  scale_fill_gradient2(low = "firebrick3", mid = "snow2", high = "dodgerblue4", 
+                       midpoint = 0, name = "Beta Direction") +
+  # Expand the y-axis (which is x-axis after coord_flip) to make room for asterisks
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) + 
+  labs(title = paste(response, "(Naive Group) Importance"),
+       subtitle = "HIV neg / No Treatment | Labels: * p<0.05, ** p<0.01, *** p<0.001",
+       x = NULL, 
+       y = "Absolute T-Statistic") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+imm_importance_plots[[response]] <- imm_p2
+  
+  message(paste0("imm_Success: Model and plots generated for ", response))
+}
+
+# Final Output display
+print(imm_model_performance_table)
+```
+
+#####Linear model with Naive
+```{r}
+library(lme4)
+library(performance)
+library(ggplot2)
+library(Metrics)
+library(dplyr)
+
+# Initialize storage with _naive suffix
+imm_model_performance_table_naive <- data.frame()
+imm_prediction_plots_naive <- list()
+imm_importance_plots_naive <- list()
+imm_ml_final_fits_naive <- list()
+
+# Define the Naive subset: HIV negative and no Treatment
+# Adjust the filter logic if your category labels are named differently (e.g., 0 or "Negative")
+base_naive <- base %>% filter(HIV_Status == "Negative" & Treatment == "No")
+
+for (response in met_vars) {
+  
+  # 1. Setup variables and data
+  conf_r <- get(paste0("conf_vars_", response))
+  
+  # REMOVE HIV_Status and Treatment from confounders for this group
+  conf_r_naive <- conf_r[!conf_r %in% c("HIV_Status", "Treatment")]
+  
+  all_preds_naive <- c(imm_vars_reduced, conf_r_naive)
+  
+  # We re-run the cleaning/log/scale logic specifically for this subset
+  # to ensure scaling is relative to the Naive group distribution
+  log_out <- paste0("Log", response)
+  
+  required_vars <- c("PID", response, all_preds_naive)
+  data_subset_naive <- na.omit(base_naive[, required_vars])
+  data_subset_naive[[log_out]] <- log10(as.numeric(data_subset_naive[[response]]))
+  data_subset_naive <- data_subset_naive[is.finite(data_subset_naive[[log_out]]), ]
+  
+  # Scaling
+  num_preds <- all_preds_naive[sapply(data_subset_naive[all_preds_naive], is.numeric)]
+  data_subset_naive[num_preds] <- lapply(data_subset_naive[num_preds], function(x) as.numeric(scale(x)))
+  
+  # 2. Split Data (80/20 by PID)
+  set.seed(123)
+  split_naive <- group_initial_split(data_subset_naive, group = PID, prop = 0.8)
+  train_naive <- training(split_naive)
+  test_naive  <- testing(split_naive)
+  
+  # 3. Fit Mixed Effects Model
+  formula_naive <- as.formula(paste0(log_out, " ~ ", 
+                                     paste(all_preds_naive, collapse = " + "), 
+                                     " + (1|PID)"))
+  
+  fit_naive <- lmer(formula_naive, data = train_naive)
+  imm_ml_final_fits_naive[[response]] <- fit_naive
+  
+  # 4. Predict and Evaluate
+  preds_naive <- predict(fit_naive, newdata = test_naive, allow.new.levels = TRUE)
+  actuals_naive <- test_naive[[log_out]]
+  
+  r2_naive   <- performance::r2(fit_naive)
+  rmse_naive <- Metrics::rmse(actuals_naive, preds_naive)
+  mae_naive  <- Metrics::mae(actuals_naive, preds_naive)
+  vif_naive  <- max(car::vif(fit_naive))
+  
+  # 5. Build Performance Table
+  imm_model_performance_table_naive <- rbind(imm_model_performance_table_naive, data.frame(
+    Outcome = response,
+    Marginal_R2 = r2_naive$R2_marginal,
+    Conditional_R2 = r2_naive$R2_conditional,
+    RMSE = rmse_naive,
+    MAE = mae_naive,
+    Max_VIF = vif_naive
+  ))
+  
+  # 6. Plot: Observed vs Predicted
+  p1_naive <- ggplot(data.frame(Obs = actuals_naive, Pred = preds_naive), aes(x = Obs, y = Pred)) +
+    geom_point(alpha = 0.5, color = "darkgreen") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "darkred") +
+    labs(title = paste(response, "(Naive): Validation"),
+         subtitle = paste("Test RMSE:", round(rmse_naive, 3)),
+         x = "Observed (Log)", y = "Predicted (Log)") +
+    theme_minimal()
+  
+  imm_prediction_plots_naive[[response]] <- p1_naive
+  
+library(lmerTest) # Ensure this is loaded to get p-values from lmer
+
+# --- Inside your for (response in met_vars) loop ---
+
+# 7. Generate Plot 2: imm_Importance (Ordered by AbsT, Colored by Estimate)
+importance_df_naive <- as.data.frame(summary(fit_naive)$coefficients) %>%
+  filter(row.names(.) != "(Intercept)") %>%
+  mutate(
+    Variable = row.names(.),
+    AbsT = abs(`t value`),
+    Estimate = Estimate,
+    # Pull p-value (it's the 5th column in lmerTest summary output)
+    P_Val = `Pr(>|t|)`,
+    # Create Asterisk Labels based on significance
+    Signif_Label = case_when(
+      P_Val < 0.001 ~ "***",
+      P_Val < 0.01  ~ "**",
+      P_Val < 0.05  ~ "*",
+      TRUE ~ "" # No label if p >= 0.05
+    )
+  ) %>%
+  arrange(desc(AbsT))
+
+p2_naive <- ggplot(importance_df_naive, aes(x = reorder(Variable, AbsT), y = AbsT, fill = Estimate)) +
+  geom_bar(stat = "identity") +
+  # Add the asterisk labels just above the bars
+  geom_text(aes(label = Signif_Label), 
+            hjust = -0.2,            # Position slightly to the right of the bar
+            vjust = 0.8,             # Center vertically relative to bar height
+            color = "black", 
+            size = 5) +
+  coord_flip() +
+  scale_fill_gradient2(low = "firebrick3", mid = "snow2", high = "dodgerblue4", 
+                       midpoint = 0, name = "Beta Direction") +
+  # Expand the y-axis (which is x-axis after coord_flip) to make room for asterisks
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) + 
+  labs(title = paste(response, "(Naive Group) Importance"),
+       subtitle = "HIV neg / No Treatment | Labels: * p<0.05, ** p<0.01, *** p<0.001",
+       x = NULL, 
+       y = "Absolute T-Statistic") +
+  theme_minimal() +
+  theme(legend.position = "right")
+
+imm_importance_plots_naive[[response]] <- p2_naive
+  
+  message(paste0("Naive Group Success: ", response))
+}
+
+print(imm_model_performance_table_naive)
+```
 
 #### Monocytes Mediation DAG
 ```{r}
