@@ -1,0 +1,929 @@
+---
+title: "Inflammation and Immune Analysis"
+author: "J. O'Connor"
+date: "2025-09-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document competes the analysis comparing Inflammatory markers CRP and IL-6 (measured by ELISA) and immune cells (measured by Flow cytometry).
+
+### Function Sourcing
+
+First the functions are all sourced
+```{r Functions, message=FALSE, warning=FALSE}
+#To access the functions directory why must direct to the parent directory
+setwd("../..")
+
+#A list of the function files is pulled
+function_files <- list.files(paste0(getwd(),"/Functions"), pattern = "\\.R$", full.names = TRUE)
+#Those functions are then sourced
+lapply(function_files, source)
+```
+
+
+### Data Loading
+
+We load all the data of interest
+
+```{r data_load, echo=FALSE}
+#All Metadata objects have been stored in one location
+mic_sg_fun_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/mic_sg_fun_objects.RDS")
+
+#Metdata objects
+  #base: all processed metadata 
+  base <- mic_sg_fun_objects$base_with_sg_fun
+  
+#Previusly Determined confounders are loaded
+conf_vars <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/conf_vars.RDS")
+
+#Confounders
+  #conf_vars_all: All confounders in one vector
+  #conf_vars_HDL: Confounders of HDL
+  #conf_vars_LDL: Confounders of LDL
+  #conf_vars_Trig: Confounders of Trig
+  #conf_vars_Glucose: Confounders of Glucose
+  conf_vars_all <- conf_vars$conf_vars_all
+  conf_vars_HDL <- conf_vars$conf_vars_HDL
+  conf_vars_LDL <- conf_vars$conf_vars_LDL
+  conf_vars_Trig <- conf_vars$conf_vars_Trig
+  conf_vars_Glucose <- conf_vars$conf_vars_Glucose
+
+```
+
+
+### Functional Differences by HIV and Treatment Status
+
+####Cross Sectional Differences
+```{r}
+
+
+met_lmer_data <- base
+
+sg_col_sums <- colSums(met_lmer_data[,4:5273])
+
+sg_prev <- c()
+for (j in 4:5273) {
+  prev_j <- length(which(met_lmer_data[,j]>0))
+  sg_prev <- append(sg_prev, prev_j)                 
+}
+nonzero_sums <- which(sg_col_sums>0 & sg_prev>16)
+#Immune cell populations are defined
+sg_fun_vars <- colnames(met_lmer_data)[nonzero_sums+3]
+
+
+
+## Cross Sectional Statistics
+
+# Stats will be generated across groups (i.e. Cohort) using the gp_stat_sum function
+
+# Statistics are performed on cohorts at different time points
+
+sg_fun_stats_co <- gp_stat_sum(data=met_lmer_data,            #Data set specified
+                            sub_vars="Week",      #Subset variable for stratification is selected
+                            dep_vars=sg_fun_vars,    #Dependent variables are the sg_fun_vars previously defined
+                            gp_var="Cohort",      #Group variable is cohort
+                            normality= FALSE,     #Data has not been normalized so we are doing nonparametric tests
+                            adj="bonferroni"      #p-value adjustment method is Bonferroni
+                            )  
+
+
+sg_fun_stats_co$padj[which(sg_fun_stats_co$group1!="HC" & sg_fun_stats_co$group2!="HC")] <- p.adjust(sg_fun_stats_co$`p-value`[which(sg_fun_stats_co$group1!="HC" & sg_fun_stats_co$group2!="HC")],method="fdr")
+
+sg_fun_stats_co$padj[which(sg_fun_stats_co$group1!="Exp" & sg_fun_stats_co$group2!="Exp")] <- p.adjust(sg_fun_stats_co$`p-value`[which(sg_fun_stats_co$group1!="Exp" & sg_fun_stats_co$group2!="Exp")],method="fdr")
+
+sg_fun_stats_co$padj[which(sg_fun_stats_co$group1!="Naïve" & sg_fun_stats_co$group2!="Naïve")] <- p.adjust(sg_fun_stats_co$`p-value`[which(sg_fun_stats_co$group1!="Naïve" & sg_fun_stats_co$group2!="Naïve")],method="fdr")
+
+
+sg_fun_diff <- sg_fun_stats_co$Measure[which(sg_fun_stats_co$padj<0.05)]
+
+
+```
+
+
+####Linear mixed effects models HIV Treatment States
+```{r}
+
+#We generate an linear mixed effects model data set to inlcude results
+sg_fun_lm_data <- expand.grid(c("HIV_Status","Treatment"),sg_fun_vars)
+
+colnames(sg_fun_lm_data) <- c("Predictor","Outcome")
+#We generate fields for the statistics
+sg_fun_lm_data["pval"] <- NA
+sg_fun_lm_data["padj"] <- NA
+sg_fun_lm_data["coef"] <- NA
+sg_fun_lm_data["sig"] <- NA
+
+for (r in sg_fun_vars) {
+  lm_data_r <- met_lmer_data[,c("HIV_Status","Treatment",r)] 
+  colnames(lm_data_r)[3] <- "Outcome"
+  lm_data_r$Outcome <- as.numeric(lm_data_r$Outcome)
+  lm_r <- lm(Outcome~HIV_Status+Treatment, data=lm_data_r)
+  sum_r <- summary(lm_r)
+  HIV_p <- sum_r$coefficients[2,4]
+  HIV_coef <- sum_r$coefficients[2,1]
+  Trt_p <- sum_r$coefficients[3,4]
+  Trt_coef  <- sum_r$coefficients[3,1]
+  sg_fun_lm_data$pval[which(sg_fun_lm_data$Predictor=="HIV_Status" & sg_fun_lm_data$Outcome==r)] <- HIV_p
+  sg_fun_lm_data$coef[which(sg_fun_lm_data$Predictor=="HIV_Status" & sg_fun_lm_data$Outcome==r)] <- HIV_coef
+  sg_fun_lm_data$pval[which(sg_fun_lm_data$Predictor=="Treatment" & sg_fun_lm_data$Outcome==r)] <- Trt_p
+  sg_fun_lm_data$coef[which(sg_fun_lm_data$Predictor=="Treatment" & sg_fun_lm_data$Outcome==r)] <- Trt_coef
+}
+
+sg_fun_lm_data$padj[which(sg_fun_lm_data$Predictor=="HIV_Status")] <- p.adjust(sg_fun_lm_data$pval[which(sg_fun_lm_data$Predictor=="HIV_Status")], method="fdr")
+
+sg_fun_lm_data$padj[which(sg_fun_lm_data$Predictor=="Treatment")] <- p.adjust(sg_fun_lm_data$pval[which(sg_fun_lm_data$Predictor=="Treatment")], method="fdr")
+
+
+
+
+
+```
+
+####GSEA analysis
+```{r}
+library(clusterProfiler)
+
+# Use the stat_rank (sign of coef * -log10 p-value) for a more robust ranking
+# Filter for HIV_Status as an example
+gene_list_hiv <- sg_fun_lm_data %>%
+  filter(Predictor == "HIV_Status") %>%
+  mutate(stat_rank = sign(coef) * -log10(pval)) %>%
+  arrange(desc(stat_rank)) %>%
+  # Pull the rank and name it with the KO ID
+  { setNames(.$stat_rank, .$Outcome) }
+
+# Remove any potential NA values
+gene_list_hiv <- gene_list_hiv[!is.na(gene_list_hiv)]
+
+# Run GSEA
+gsea_results_hiv <- gseKEGG(geneList = gene_list_hiv,
+                        organism = 'ko',
+                        minGSSize = 10,
+                        maxGSSize = 500,
+                        pvalueCutoff = 1.0,
+                        pAdjustMethod = "BH")
+
+hiv_GSEA_result <- gsea_results_hiv@result %>%
+  # Create a temporary column for absolute NES to sort by
+  mutate(abs_NES = abs(NES)) %>%
+  arrange(desc(abs_NES)) %>%
+  slice_head(n = 20) %>%
+  # Reorder the y-axis by the actual NES (not absolute) so they flow - to +
+  mutate(Description = fct_reorder(Description, NES))
+
+hiv_dotplot <- ggplot(hiv_GSEA_result, aes(x = NES, y = Description)) +
+  geom_point(aes(size = setSize, color = p.adjust)) +
+  # Use a gradient that highlights significance (low p-values)
+  scale_color_continuous(low = "red", high = "blue", name = "p.adj") +
+  # Adjust size range to make dots legible
+  scale_size_continuous(range = c(3, 8), name = "Gene Count") +
+  theme_bw() +
+  labs(
+    title = "HIV Enrichment Analysis",
+    x = "NES",
+    y = NULL,
+    tag="A",
+    color="p-adjusted"
+  ) +
+    theme(legend.position = "right",
+          title = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size=15),
+        axis.text.y = element_text(size = 15),
+        strip.text.x = element_text(size=12),
+        strip.text.y = element_text(size=15),
+        plot.tag = element_text(size=25),
+        ggh4x.facet.nestline = element_blank(),
+        strip.background.x = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ),
+        strip.background.y = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ))+
+  # Add a vertical line at 0 for easier interpretation of Up/Down regulation
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
+
+#Now for treatment
+
+# Use the stat_rank (sign of coef * -log10 p-value) for a more robust ranking
+# Filter for HIV_Status as an example
+gene_list_trt <- sg_fun_lm_data %>%
+  filter(Predictor == "Treatment") %>%
+  mutate(stat_rank = sign(coef) * -log10(pval)) %>%
+  arrange(desc(stat_rank)) %>%
+  # Pull the rank and name it with the KO ID
+  { setNames(.$stat_rank, .$Outcome) }
+
+
+
+# Remove any potential NA values
+gene_list_trt <- gene_list_trt[!is.na(gene_list_trt)]
+
+# Run GSEA
+gsea_results_trt <- gseKEGG(geneList = gene_list_trt,
+                        organism = 'ko',
+                        minGSSize = 10,
+                        maxGSSize = 500,
+                        pvalueCutoff = 1.0,
+                        pAdjustMethod = "BH")
+
+trt_GSEA_result <- gsea_results_trt@result  %>%
+  # Create a temporary column for absolute NES to sort by
+  mutate(abs_NES = abs(NES)) %>%
+  arrange(desc(abs_NES)) %>%
+  slice_head(n = 20) %>%
+  # Reorder the y-axis by the actual NES (not absolute) so they flow - to +
+  mutate(Description = fct_reorder(Description, NES))
+
+trt_dotplot <- ggplot(trt_GSEA_result, aes(x = NES, y = Description)) +
+  geom_point(aes(size = setSize, color = p.adjust)) +
+  # Use a gradient that highlights significance (low p-values)
+  scale_color_continuous(low = "red", high = "blue", name = "p.adj") +
+  # Adjust size range to make dots legible
+  scale_size_continuous(range = c(3, 8), name = "Gene Count") +
+  theme_bw() +
+  labs(
+    title = "Treatment Enrichment Analysis",
+    x = "NES",
+    y = NULL,
+    tag="B",
+    color="p-adjusted"
+  ) +
+    theme(legend.position = "right",
+          title = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size=15),
+        axis.text.y = element_text(size = 15),
+        strip.text.x = element_text(size=12),
+        strip.text.y = element_text(size=15),
+        plot.tag = element_text(size=25),
+        ggh4x.facet.nestline = element_blank(),
+        strip.background.x = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ),
+        strip.background.y = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ))+
+  # Add a vertical line at 0 for easier interpretation of Up/Down regulation
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
+
+
+ggarrange(hiv_dotplot,trt_dotplot)
+
+```
+
+
+
+
+###Functional Differences by Metabolic Outcome
+
+####Linear Mixed Effects Models  - All Participants
+
+```{r}
+
+#metaboic variables are defined
+met_vars <- c("HDL","LDL","Trig","Glucose")
+#We generate an linear mixed effects model data set to inlcude results
+sg_fun_lm_met_data <- unique(expand.grid(sg_fun_vars, met_vars))
+
+colnames(sg_fun_lm_met_data) <- c("Predictor","Outcome")
+#We generate fields for the statistics
+sg_fun_lm_met_data["pval"] <- NA
+sg_fun_lm_met_data["padj"] <- NA
+sg_fun_lm_met_data["coef"] <- NA
+sg_fun_lm_met_data["sig"] <- NA
+sg_fun_lm_met_data["percent_variance_exp"] <- NA
+
+for (k in 1:nrow(sg_fun_lm_met_data)) {
+  
+  #Response variable is pulled out
+  response <- as.character(sg_fun_lm_met_data$Outcome[k])
+  
+  #We pull the confounders for that variable
+  conf_r_pre <- get(paste0("conf_vars_",response))
+  
+  conf_r <- setdiff(conf_r_pre,c("Location"))
+  
+  #Predictor variable is pulled out
+  predictor <-  as.character(sg_fun_lm_met_data$Predictor[k])
+  #We add the confounders with the predictor
+  predictor_with_confs <- c(predictor,conf_r)
+
+  #We remove missing variables
+  data_r <- na.omit(met_lmer_data[,c(response,predictor_with_confs)])
+  
+  if (min(sapply(data_r, function(x) length(unique(x)))>1)) {
+   # create full model 
+  ff <- as.formula(paste0(response,"~",paste0(predictor_with_confs, collapse="+"))) 
+  fm <- lm(ff,data = data_r)
+  
+  predict_fm <- predict(fm)
+  sum_fm <- summary(fm)
+  
+  #Below we calculate the R -suared value
+  #First total sum of squares
+    tss <- sum((unlist(data_r[,c(response)])-mean(unlist(data_r[,c(response)])))^2)
+    #Second residual sum of squares
+    rss <- sum((unlist(data_r[,c(response)])-predict_fm)^2)
+  #R-squared
+  r_squared <- 1-(rss/tss)
+  #Percent variance explained
+  pve <- r_squared*100
+  
+  sg_fun_lm_met_data$percent_variance_exp[k] <- pve
+  class(pve) <- "numeric"
+  
+  #We pull out the coefficinets
+  coef_fm <- as.data.frame(sum_fm$coefficients)
+  
+  sg_fun_lm_met_data$pval[k] <- coef_fm[2,4]
+  sg_fun_lm_met_data$coef[k] <- coef_fm[2,1] 
+  }
+
+  
+  
+}
+
+for (m in met_vars) {
+  
+  sg_fun_lm_met_data$padj[which(sg_fun_lm_met_data$Outcome==m)] <- p.adjust(sg_fun_lm_met_data$pval[which(sg_fun_lm_met_data$Outcome==m)], method="fdr")
+  
+}
+
+
+
+
+```
+
+####Linear Mixed Effects Models  - Naive Participants
+```{r}
+
+#metaboic variables are defined
+met_vars <- c("HDL","LDL","Trig","Glucose")
+#We generate an linear mixed effects model data set to inlcude results
+sg_fun_lm_met_data_naive <- unique(expand.grid(sg_fun_vars, met_vars))
+
+colnames(sg_fun_lm_met_data_naive) <- c("Predictor","Outcome")
+#We generate fields for the statistics
+sg_fun_lm_met_data_naive["pval"] <- NA
+sg_fun_lm_met_data_naive["padj"] <- NA
+sg_fun_lm_met_data_naive["coef"] <- NA
+sg_fun_lm_met_data_naive["sig"] <- NA
+sg_fun_lm_met_data_naive["percent_variance_exp"] <- NA
+
+for (k in 1:nrow(sg_fun_lm_met_data_naive)) {
+  
+  #Response variable is pulled out
+  response <- as.character(sg_fun_lm_met_data_naive$Outcome[k])
+  
+  #We pull the confounders for that variable
+  conf_r_pre <- get(paste0("conf_vars_",response))
+  
+  conf_r <- setdiff(conf_r_pre,c("HIV_Status","Treatment","Location"))
+  
+  #Predictor variable is pulled out
+  predictor <-  as.character(sg_fun_lm_met_data_naive$Predictor[k])
+  #We add the confounders with the predictor
+  predictor_with_confs <- c(predictor,conf_r)
+  
+  #We remove missing variables
+  data_r <- na.omit(met_lmer_data[which(met_lmer_data$Cohort=="Naïve"),c(response,predictor_with_confs)])
+  
+  if (min(sapply(data_r, function(x) length(unique(x)))>1)) {
+    # create full model 
+    ff <- as.formula(paste0(response,"~",paste0(predictor_with_confs, collapse="+"))) 
+    fm <- lm(ff,data = data_r)
+    
+    predict_fm <- predict(fm)
+    sum_fm <- summary(fm)
+    
+    #Below we calculate the R -suared value
+    #First total sum of squares
+    tss <- sum((unlist(data_r[,c(response)])-mean(unlist(data_r[,c(response)])))^2)
+    #Second residual sum of squares
+    rss <- sum((unlist(data_r[,c(response)])-predict_fm)^2)
+    #R-squared
+    r_squared <- 1-(rss/tss)
+    #Percent variance explained
+    pve <- r_squared*100
+    
+    sg_fun_lm_met_data_naive$percent_variance_exp[k] <- pve
+    class(pve) <- "numeric"
+    
+    #We pull out the coefficinets
+    coef_fm <- as.data.frame(sum_fm$coefficients)
+    
+    sg_fun_lm_met_data_naive$pval[k] <- coef_fm[2,4]
+    sg_fun_lm_met_data_naive$coef[k] <- coef_fm[2,1] 
+  }
+  
+  
+  
+}
+
+for (m in met_vars) {
+  
+  sg_fun_lm_met_data_naive$padj[which(sg_fun_lm_met_data_naive$Outcome==m)] <- p.adjust(sg_fun_lm_met_data_naive$pval[which(sg_fun_lm_met_data_naive$Outcome==m)], method="fdr")
+  
+  assign(paste(m,"_sig_genes"), unique(sg_fun_lm_met_data_naive$Predictor[which(sg_fun_lm_met_data_naive$padj<0.05 & sg_fun_lm_met_data_naive$Outcome==m)]))
+}
+
+test_data <- met_lmer_data[which(met_lmer_data$Cohort=="Naïve"),]
+
+test_lm_data <- sg_fun_lm_met_data_naive[which(sg_fun_lm_met_data_naive$Outcome=="LDL" & sg_fun_lm_met_data_naive$padj<0.05),]
+
+
+
+
+# First I use them same color scheme as described in Zim1 
+cohortColors <- palette(brewer.pal(n = 5, name = "BrBG"))
+cohortColors <- palette(brewer.pal(n = 5, name = "BrBG")) #Repeated to solidify? 
+
+met_lmer_data_naive <- met_lmer_data[which(met_lmer_data$Cohort=="Naïve"),]
+
+Glucose_Gene_Plot <- ggplot(data=met_lmer_data_naive, mapping=aes(x=K19510, y=Glucose, fill=Cohort))+ 
+            geom_point(shape=21, size=3, stroke=1) + 
+        scale_y_log10()+
+        scale_fill_manual(values=c(cohortColors[1],
+                                   "gray",
+                                   cohortColors[5]))+
+    geom_smooth(aes(x=met_lmer_data_naive$K19510, y=met_lmer_data_naive$Glucose), 
+                method="lm", se=TRUE, inherit.aes=FALSE) +
+        theme_bw() +
+        labs(y="Glucose (mg/dL)",x="fructoselysine-6-phosphate deglycase (TPM)") +
+        theme(legend.position = "bottom",
+              legend.text = element_text(size=15),
+              legend.title = element_blank(),
+          axis.text.x = element_text(size = 12),
+          axis.title.y = element_text(size=15),
+          axis.title.x = element_text(size=15),
+          axis.text.y = element_text(size = 12),
+          strip.text.x = element_text(size=12),
+          strip.text.y = element_text(size=10),
+          plot.tag = element_text(size=25),
+          ggh4x.facet.nestline = element_blank(),
+          strip.background.x = element_rect(
+            color="black", fill="gray", linetype="solid"
+          ),
+          strip.background.y = element_rect(
+            color="black", fill="gray", linetype="solid"
+        ))
+```
+
+####GSEA Analysis - All Particpants
+```{r}
+
+# Use the stat_rank (sign of coef * -log10 p-value) for a more robust ranking
+# Filter for HIV_Status as an example
+gene_list_hdl <- sg_fun_lm_met_data %>%
+  filter(Outcome == "HDL") %>%
+  mutate(stat_rank = sign(coef) * -log10(pval)) %>%
+  arrange(desc(stat_rank)) %>%
+  # Pull the rank and name it with the KO ID
+  { setNames(.$stat_rank, .$Predictor) }
+
+# Remove any potential NA values
+gene_list_hdl <- gene_list_hdl[!is.na(gene_list_hdl)]
+
+# Run GSEA
+gsea_results_hdl <- gseKEGG(geneList = gene_list_hdl,
+                        organism = 'ko',
+                        minGSSize = 10,
+                        maxGSSize = 500,
+                        pvalueCutoff = 1.0,
+                        pAdjustMethod = "BH")
+
+hdl_GSEA_result <- gsea_results_hdl@result %>%
+  # Create a temporary column for absolute NES to sort by
+  mutate(abs_NES = abs(NES)) %>%
+  arrange(desc(abs_NES)) %>%
+  slice_head(n = 20) %>%
+  # Reorder the y-axis by the actual NES (not absolute) so they flow - to +
+  mutate(Description = fct_reorder(Description, NES))
+
+hdl_dotplot <- ggplot(hdl_GSEA_result, aes(x = NES, y = Description)) +
+  geom_point(aes(size = setSize, color = p.adjust)) +
+  # Use a gradient that highlights significance (low p-values)
+  scale_color_continuous(low = "red", high = "blue", name = "p.adj") +
+  # Adjust size range to make dots legible
+  scale_size_continuous(range = c(3, 8), name = "Gene Count") +
+  theme_bw() +
+  labs(
+    title = "HDL Enrichment Analysis",
+    x = "NES",
+    y = NULL,
+    tag="A",
+    color="p-adjusted"
+  ) +
+    theme(legend.position = "right",
+          title = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size=15),
+        axis.text.y = element_text(size = 15),
+        strip.text.x = element_text(size=12),
+        strip.text.y = element_text(size=15),
+        plot.tag = element_text(size=25),
+        ggh4x.facet.nestline = element_blank(),
+        strip.background.x = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ),
+        strip.background.y = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ))+
+  # Add a vertical line at 0 for easier interpretation of Up/Down regulation
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
+
+
+# Use the stat_rank (sign of coef * -log10 p-value) for a more robust ranking
+# Filter for HIV_Status as an example
+gene_list_ldl <- sg_fun_lm_met_data %>%
+  filter(Outcome == "LDL") %>%
+  mutate(stat_rank = sign(coef) * -log10(pval)) %>%
+  arrange(desc(stat_rank)) %>%
+  # Pull the rank and name it with the KO ID
+  { setNames(.$stat_rank, .$Predictor) }
+
+# Remove any potential NA values
+gene_list_ldl <- gene_list_ldl[!is.na(gene_list_ldl)]
+
+# Run GSEA
+gsea_results_ldl <- gseKEGG(geneList = gene_list_ldl,
+                            organism = 'ko',
+                            minGSSize = 10,
+                            maxGSSize = 500,
+                            pvalueCutoff = 1.0,
+                            pAdjustMethod = "BH")
+
+ldl_GSEA_result <- gsea_results_ldl@result %>%
+  # Create a temporary column for absolute NES to sort by
+  mutate(abs_NES = abs(NES)) %>%
+  arrange(desc(abs_NES)) %>%
+  slice_head(n = 20) %>%
+  # Reorder the y-axis by the actual NES (not absolute) so they flow - to +
+  mutate(Description = fct_reorder(Description, NES))
+
+ldl_dotplot <- ggplot(ldl_GSEA_result, aes(x = NES, y = Description)) +
+  geom_point(aes(size = setSize, color = p.adjust)) +
+  # Use a gradient that highlights significance (low p-values)
+  scale_color_continuous(low = "red", high = "blue", name = "p.adj") +
+  # Adjust size range to make dots legible
+  scale_size_continuous(range = c(3, 8), name = "Gene Count") +
+  theme_bw() +
+  labs(
+    title = "LDL Enrichment Analysis",
+    x = "NES",
+    y = NULL,
+    tag="B",
+    color="p-adjusted"
+  ) +
+  theme(legend.position = "right",
+        title = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size=15),
+        axis.text.y = element_text(size = 15),
+        strip.text.x = element_text(size=12),
+        strip.text.y = element_text(size=15),
+        plot.tag = element_text(size=25),
+        ggh4x.facet.nestline = element_blank(),
+        strip.background.x = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ),
+        strip.background.y = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ))+
+  # Add a vertical line at 0 for easier interpretation of Up/Down regulation
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
+
+
+# Use the stat_rank (sign of coef * -log10 p-value) for a more robust ranking
+# Filter for HIV_Status as an example
+gene_list_trig <- sg_fun_lm_met_data %>%
+  filter(Outcome == "Trig") %>%
+  mutate(stat_rank = sign(coef) * -log10(pval)) %>%
+  arrange(desc(stat_rank)) %>%
+  # Pull the rank and name it with the KO ID
+  { setNames(.$stat_rank, .$Predictor) }
+
+# Remove any potential NA values
+gene_list_trig <- gene_list_trig[!is.na(gene_list_trig)]
+
+# Run GSEA
+gsea_results_trig <- gseKEGG(geneList = gene_list_trig,
+                            organism = 'ko',
+                            minGSSize = 10,
+                            maxGSSize = 500,
+                            pvalueCutoff = 1.0,
+                            pAdjustMethod = "BH")
+
+trig_GSEA_result <- gsea_results_trig@result %>%
+  # Create a temporary column for absolute NES to sort by
+  mutate(abs_NES = abs(NES)) %>%
+  arrange(desc(abs_NES)) %>%
+  slice_head(n = 20) %>%
+  # Reorder the y-axis by the actual NES (not absolute) so they flow - to +
+  mutate(Description = fct_reorder(Description, NES))
+
+trig_dotplot <- ggplot(trig_GSEA_result, aes(x = NES, y = Description)) +
+  geom_point(aes(size = setSize, color = p.adjust)) +
+  # Use a gradient that highlights significance (low p-values)
+  scale_color_continuous(low = "red", high = "blue", name = "p.adj") +
+  # Adjust size range to make dots legible
+  scale_size_continuous(range = c(3, 8), name = "Gene Count") +
+  theme_bw() +
+  labs(
+    title = "Triglycerides Enrichment Analysis",
+    x = "NES",
+    y = NULL,
+    tag="C",
+    color="p-adjusted"
+  ) +
+  theme(legend.position = "right",
+        title = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size=15),
+        axis.text.y = element_text(size = 15),
+        strip.text.x = element_text(size=12),
+        strip.text.y = element_text(size=15),
+        plot.tag = element_text(size=25),
+        ggh4x.facet.nestline = element_blank(),
+        strip.background.x = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ),
+        strip.background.y = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ))+
+  # Add a vertical line at 0 for easier interpretation of Up/Down regulation
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
+
+# Use the stat_rank (sign of coef * -log10 p-value) for a more robust ranking
+# Filter for HIV_Status as an example
+gene_list_gluc <- sg_fun_lm_met_data %>%
+  filter(Outcome == "Glucose") %>%
+  mutate(stat_rank = sign(coef) * -log10(pval)) %>%
+  arrange(desc(stat_rank)) %>%
+  # Pull the rank and name it with the KO ID
+  { setNames(.$stat_rank, .$Predictor) }
+
+# Remove any potential NA values
+gene_list_gluc <- gene_list_gluc[!is.na(gene_list_gluc)]
+
+# Run GSEA
+gsea_results_gluc <- gseKEGG(geneList = gene_list_gluc,
+                            organism = 'ko',
+                            minGSSize = 10,
+                            maxGSSize = 500,
+                            pvalueCutoff = 1.0,
+                            pAdjustMethod = "BH")
+
+gluc_GSEA_result <- gsea_results_gluc@result %>%
+  # Create a temporary column for absolute NES to sort by
+  mutate(abs_NES = abs(NES)) %>%
+  arrange(desc(abs_NES)) %>%
+  slice_head(n = 20) %>%
+  # Reorder the y-axis by the actual NES (not absolute) so they flow - to +
+  mutate(Description = fct_reorder(Description, NES))
+
+gluc_dotplot <- ggplot(gluc_GSEA_result, aes(x = NES, y = Description)) +
+  geom_point(aes(size = setSize, color = p.adjust)) +
+  # Use a gradient that highlights significance (low p-values)
+  scale_color_continuous(low = "red", high = "blue", name = "p.adj") +
+  # Adjust size range to make dots legible
+  scale_size_continuous(range = c(3, 8), name = "Gene Count") +
+  theme_bw() +
+  labs(
+    title = "Glucose Enrichment Analysis",
+    x = "NES",
+    y = NULL,
+    tag="D",
+    color="p-adjusted"
+  ) +
+  theme(legend.position = "right",
+        title = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size=15),
+        axis.text.y = element_text(size = 15),
+        strip.text.x = element_text(size=12),
+        strip.text.y = element_text(size=15),
+        plot.tag = element_text(size=25),
+        ggh4x.facet.nestline = element_blank(),
+        strip.background.x = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ),
+        strip.background.y = element_rect(
+          color="black", fill="gray", linetype="solid"
+        ))+
+  # Add a vertical line at 0 for easier interpretation of Up/Down regulation
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
+
+
+ggarrange(hdl_dotplot,ldl_dotplot)
+
+ggarrange(trig_dotplot,gluc_dotplot)
+
+```
+
+
+####GSEA Analysis - Naive Particpants
+
+```{r}
+# --- HDL Analysis (Naive) ---
+gene_list_hdl_naive <- sg_fun_lm_met_data_naive %>%
+  filter(Outcome == "HDL") %>%
+  mutate(stat_rank = sign(coef) * -log10(pval)) %>%
+  arrange(desc(stat_rank)) %>%
+  { setNames(.$stat_rank, .$Predictor) }
+
+gene_list_hdl_naive <- gene_list_hdl_naive[!is.na(gene_list_hdl_naive)]
+
+gsea_results_hdl_naive <- gseKEGG(geneList = gene_list_hdl_naive,
+                                  organism = 'ko',
+                                  minGSSize = 10,
+                                  maxGSSize = 500,
+                                  pvalueCutoff = 1.0,
+                                  pAdjustMethod = "BH")
+
+hdl_GSEA_result_naive <- gsea_results_hdl_naive@result %>%
+  mutate(abs_NES = abs(NES)) %>%
+  arrange(desc(abs_NES)) %>%
+  slice_head(n = 20) %>%
+  mutate(Description = fct_reorder(Description, NES))
+
+hdl_dotplot_naive <- ggplot(hdl_GSEA_result_naive, aes(x = NES, y = Description)) +
+  geom_point(aes(size = setSize, color = p.adjust)) +
+  scale_color_continuous(low = "red", high = "blue", name = "p.adj") +
+  scale_size_continuous(range = c(3, 8), name = "Gene Count") +
+  theme_bw() +
+  labs(
+    title = "HDL Enrichment Analysis (Naive)",
+    x = "NES", y = NULL, tag = "A", color = "p-adjusted"
+  ) +
+  theme(legend.position = "right",
+        title = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        plot.tag = element_text(size = 25)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
+
+
+# --- LDL Analysis (Naive) ---
+gene_list_ldl_naive <- sg_fun_lm_met_data_naive %>%
+  filter(Outcome == "LDL") %>%
+  mutate(stat_rank = sign(coef) * -log10(pval)) %>%
+  arrange(desc(stat_rank)) %>%
+  { setNames(.$stat_rank, .$Predictor) }
+
+gene_list_ldl_naive <- gene_list_ldl_naive[!is.na(gene_list_ldl_naive)]
+
+gsea_results_ldl_naive <- gseKEGG(geneList = gene_list_ldl_naive,
+                                  organism = 'ko',
+                                  minGSSize = 10,
+                                  maxGSSize = 500,
+                                  pvalueCutoff = 1.0,
+                                  pAdjustMethod = "BH")
+
+ldl_GSEA_result_naive <- gsea_results_ldl_naive@result %>%
+  mutate(abs_NES = abs(NES)) %>%
+  arrange(desc(abs_NES)) %>%
+  slice_head(n = 20) %>%
+  mutate(Description = fct_reorder(Description, NES))
+
+ldl_dotplot_naive <- ggplot(ldl_GSEA_result_naive, aes(x = NES, y = Description)) +
+  geom_point(aes(size = setSize, color = p.adjust)) +
+  scale_color_continuous(low = "red", high = "blue", name = "p.adj") +
+  scale_size_continuous(range = c(3, 8), name = "Gene Count") +
+  theme_bw() +
+  labs(
+    title = "LDL Enrichment Analysis (Naive)",
+    x = "NES", y = NULL, tag = "B", color = "p-adjusted"
+  ) +
+  theme(legend.position = "right",
+        title = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        plot.tag = element_text(size = 25)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
+
+
+# --- Triglycerides Analysis (Naive) ---
+gene_list_trig_naive <- sg_fun_lm_met_data_naive %>%
+  filter(Outcome == "Trig") %>%
+  mutate(stat_rank = sign(coef) * -log10(pval)) %>%
+  arrange(desc(stat_rank)) %>%
+  { setNames(.$stat_rank, .$Predictor) }
+
+gene_list_trig_naive <- gene_list_trig_naive[!is.na(gene_list_trig_naive)]
+
+gsea_results_trig_naive <- gseKEGG(geneList = gene_list_trig_naive,
+                                   organism = 'ko',
+                                   minGSSize = 10,
+                                   maxGSSize = 500,
+                                   pvalueCutoff = 1.0,
+                                   pAdjustMethod = "BH")
+
+trig_GSEA_result_naive <- gsea_results_trig_naive@result %>%
+  mutate(abs_NES = abs(NES)) %>%
+  arrange(desc(abs_NES)) %>%
+  slice_head(n = 20) %>%
+  mutate(Description = fct_reorder(Description, NES))
+
+trig_dotplot_naive <- ggplot(trig_GSEA_result_naive, aes(x = NES, y = Description)) +
+  geom_point(aes(size = setSize, color = p.adjust)) +
+  scale_color_continuous(low = "red", high = "blue", name = "p.adj") +
+  scale_size_continuous(range = c(3, 8), name = "Gene Count") +
+  theme_bw() +
+  labs(
+    title = "Triglycerides Enrichment Analysis (Naive)",
+    x = "NES", y = NULL, tag = "C", color = "p-adjusted"
+  ) +
+  theme(legend.position = "right",
+        title = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        plot.tag = element_text(size = 25)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
+
+
+# --- Glucose Analysis (Naive) ---
+gene_list_gluc_naive <- sg_fun_lm_met_data_naive %>%
+  filter(Outcome == "Glucose") %>%
+  mutate(stat_rank = sign(coef) * -log10(pval)) %>%
+  arrange(desc(stat_rank)) %>%
+  { setNames(.$stat_rank, .$Predictor) }
+
+gene_list_gluc_naive <- gene_list_gluc_naive[!is.na(gene_list_gluc_naive)]
+
+gsea_results_gluc_naive <- gseKEGG(geneList = gene_list_gluc_naive,
+                                   organism = 'ko',
+                                   minGSSize = 10,
+                                   maxGSSize = 500,
+                                   pvalueCutoff = 1.0,
+                                   pAdjustMethod = "BH")
+
+gluc_GSEA_result_naive <- gsea_results_gluc_naive@result %>%
+  mutate(abs_NES = abs(NES)) %>%
+  arrange(desc(abs_NES)) %>%
+  slice_head(n = 20) %>%
+  mutate(Description = fct_reorder(Description, NES))
+
+gluc_dotplot_naive <- ggplot(gluc_GSEA_result_naive, aes(x = NES, y = Description)) +
+  geom_point(aes(size = setSize, color = p.adjust)) +
+  scale_color_continuous(low = "red", high = "blue", name = "p.adj") +
+  scale_size_continuous(range = c(3, 8), name = "Gene Count") +
+  theme_bw() +
+  labs(
+    title = "Glucose Enrichment Analysis (Naive)",
+    x = "NES", y = NULL, tag = "D", color = "p-adjusted"
+  ) +
+  theme(legend.position = "right",
+        title = element_text(size = 20),
+        legend.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        axis.text.x = element_text(size = 15),
+        axis.title.y = element_text(size = 20),
+        axis.title.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        plot.tag = element_text(size = 25)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
+
+# --- Combine Plots ---
+ggarrange(hdl_dotplot_naive, ldl_dotplot_naive)
+ggarrange(trig_dotplot_naive, gluc_dotplot_naive)
+
+```
+

@@ -534,7 +534,7 @@ for (response in met_vars) {
               color = "black", 
               size = 5) +
     coord_flip() +
-    scale_fill_gradient2(low = "firebrick3", mid = "snow2", high = "dodgerblue4", 
+    scale_fill_gradient2(low = "dodgerblue4", mid = "snow2", high = "firebrick3", 
                          midpoint = 0, name = "Beta Direction") +
     # Expand the y-axis (which is x-axis after coord_flip) to make room for asterisks
     scale_y_continuous(expand = expansion(mult = c(0, 0.15))) + 
@@ -670,7 +670,7 @@ for (response in met_vars) {
               color = "black", 
               size = 5) +
     coord_flip() +
-    scale_fill_gradient2(low = "firebrick3", mid = "snow2", high = "dodgerblue4", 
+    scale_fill_gradient2(low = "dodgerblue4", mid = "snow2", high = "firebrick3",
                          midpoint = 0, name = "Beta Direction") +
     # Expand the y-axis (which is x-axis after coord_flip) to make room for asterisks
     scale_y_continuous(expand = expansion(mult = c(0, 0.15))) + 
@@ -1650,11 +1650,11 @@ imm_p2 <- ggplot(imm_importance_df, aes(x = reorder(Variable, AbsT), y = AbsT, f
             color = "black", 
             size = 5) +
   coord_flip() +
-  scale_fill_gradient2(low = "firebrick3", mid = "snow2", high = "dodgerblue4", 
+  scale_fill_gradient2(low = "dodgerblue4", mid = "snow2", high = "firebrick3",
                        midpoint = 0, name = "Beta Direction") +
   # Expand the y-axis (which is x-axis after coord_flip) to make room for asterisks
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) + 
-  labs(title = paste(response, "(Naive Group) Importance"),
+  labs(title = paste(response, "Importance All Participants"),
        subtitle = "HIV neg / No Treatment | Labels: * p<0.05, ** p<0.01, *** p<0.001",
        x = NULL, 
        y = "Absolute T-Statistic") +
@@ -1787,7 +1787,7 @@ p2_naive <- ggplot(importance_df_naive, aes(x = reorder(Variable, AbsT), y = Abs
             color = "black", 
             size = 5) +
   coord_flip() +
-  scale_fill_gradient2(low = "firebrick3", mid = "snow2", high = "dodgerblue4", 
+  scale_fill_gradient2(low = "dodgerblue4", mid = "snow2", high = "firebrick3", 
                        midpoint = 0, name = "Beta Direction") +
   # Expand the y-axis (which is x-axis after coord_flip) to make room for asterisks
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) + 
@@ -1804,6 +1804,230 @@ imm_importance_plots_naive[[response]] <- p2_naive
 }
 
 print(imm_model_performance_table_naive)
+```
+
+#####RF with All
+```{r}
+library(MixRF)
+library(ggplot2)
+library(Metrics)
+library(dplyr)
+
+# Initialize storage
+imm_rf_performance_table <- data.frame()
+imm_rf_prediction_plots <- list()
+imm_rf_importance_plots <- list()
+imm_rf_final_fits <- list()
+
+for (response in met_vars) {
+  
+  # 1. Setup variables
+  conf_r <- get(paste0("conf_vars_", response))
+  all_preds <- c(imm_vars_reduced, conf_r) 
+  train_df <- imm_ml_ready_data[[response]]$train
+  test_df  <- imm_ml_ready_data[[response]]$test
+  log_out  <- paste0("Log", response)
+  
+  # 2. CREATE train_clean
+  train_clean <- train_df %>% 
+    dplyr::select(all_of(c(log_out, all_preds, "PID"))) %>% 
+    na.omit()
+  
+  train_y    <- train_clean[[log_out]]
+  train_id   <- as.character(train_clean$PID)
+  train_x_df <- as.data.frame(lapply(train_clean[, all_preds], as.numeric))
+  
+  # 3. Fit Mixed Effects Random Forest
+  set.seed(2730321)
+  imm_rf_fit <- MixRF(Y = train_y, X = train_x_df, random = "(1|PID)", data=train_clean)
+  imm_rf_final_fits[[response]] <- imm_rf_fit
+  
+  # 4. Predict on Test Set
+  test_clean <- test_df %>% 
+    dplyr::select(all_of(c(log_out, all_preds, "PID"))) %>% 
+    na.omit()
+  
+  test_x_df <- as.data.frame(lapply(test_clean[, all_preds], as.numeric))
+  
+  imm_preds <- predict(imm_rf_fit$forest, test_x_df)
+  imm_actuals <- test_clean[[log_out]]
+  
+  # 5. METRICS
+  imm_rmse_val <- Metrics::rmse(imm_actuals, imm_preds)
+  imm_r2_val <- cor(imm_actuals, imm_preds)^2
+  
+  imm_rf_performance_table <- rbind(imm_rf_performance_table, data.frame(
+    Outcome = response, 
+    Pseudo_R2 = imm_r2_val,
+    RMSE = imm_rmse_val
+  ))
+
+  # 6. DIRECTION CHECK
+  dir_check <- sapply(all_preds, function(p) {
+    feature_vec <- train_clean[[p]]
+    if (is.numeric(feature_vec)) {
+      return(cor(feature_vec, train_y, method = "spearman", use = "complete.obs"))
+    } else {
+      levs <- unique(na.omit(feature_vec))
+      if (length(levs) == 2) {
+        m1 <- mean(train_y[feature_vec == levs[1]], na.rm = TRUE)
+        m2 <- mean(train_y[feature_vec == levs[2]], na.rm = TRUE)
+        return(m2 - m1)
+      } else { return(0) }
+    }
+  })
+
+  # 7. Importance Plot
+  importance_vals <- imm_rf_fit[["forest"]][["importance"]]
+  imm_imp_df <- data.frame(
+    Variable = rownames(importance_vals),
+    Importance = as.numeric(importance_vals),
+    Direction = dir_check[rownames(importance_vals)]
+  ) %>% arrange(desc(Importance))
+
+  imm_p2 <- ggplot(imm_imp_df, aes(x = reorder(Variable, Importance), y = Importance, fill = Direction)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    scale_fill_gradient2(low = "dodgerblue4", mid = "snow2", high = "firebrick3", 
+                         midpoint = 0, name = "Direction") +
+    labs(title = paste(response, "RF Importance"),
+         subtitle = "Height: Gini Importance | Color: Association Direction",
+         x = NULL, y = "Node Purity Increase") +
+    theme_minimal()
+
+  imm_rf_importance_plots[[response]] <- imm_p2
+
+  # 8. ADDED: Prediction (Performance) Plot
+  imm_p1_df <- data.frame(Observed = imm_actuals, Predicted = imm_preds)
+  
+  imm_p1 <- ggplot(imm_p1_df, aes(x = Observed, y = Predicted)) +
+    geom_point(alpha = 0.6, color = "steelblue") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "darkred") +
+    labs(title = paste("RF:", response, "Performance"),
+         subtitle = paste("Test R²:", round(imm_r2_val, 3), "| RMSE:", round(imm_rmse_val, 3)),
+         x = "Observed (Log)", y = "Predicted (Log)") +
+    theme_minimal()
+  
+  imm_rf_prediction_plots[[response]] <- imm_p1
+  
+  message(paste0("RF Success: plots generated for ", response))
+}
+
+# Final Performance Summary
+print(imm_rf_performance_table)
+```
+
+#####RF with only Naive
+```{r}
+library(MixRF)
+library(ggplot2)
+library(Metrics)
+library(dplyr)
+
+# Initialize storage for Naive group
+imm_rf_performance_naive <- data.frame()
+imm_rf_prediction_plots_naive <- list()
+imm_rf_importance_plots_naive <- list()
+imm_rf_final_fits_naive <- list()
+
+# Define the Naive subset
+base_naive <- base %>% filter(HIV_Status == "Negative" & Treatment == "No")
+
+for (response in met_vars) {
+  
+  # 1. Setup variables
+  conf_r <- get(paste0("conf_vars_", response))
+  
+  # REMOVE HIV_Status and Treatment as they have no variance in this group
+  conf_r_naive <- conf_r[!conf_r %in% c("HIV_Status", "Treatment")]
+  all_preds_naive <- c(imm_vars_reduced, conf_r_naive)
+  
+  log_out <- paste0("Log", response)
+  
+  # 2. CREATE train_clean_naive
+  # We re-process specifically for this subset to ensure proper scaling
+  data_subset_naive <- base_naive %>% 
+    dplyr::select(all_of(c("PID", response, all_preds_naive))) %>%
+    na.omit()
+  
+  data_subset_naive[[log_out]] <- log10(as.numeric(data_subset_naive[[response]]))
+  data_subset_naive <- data_subset_naive[is.finite(data_subset_naive[[log_out]]), ]
+  
+  # Re-scale numeric predictors based on the Naive group's distribution
+  num_preds <- all_preds_naive[sapply(data_subset_naive[all_preds_naive], is.numeric)]
+  data_subset_naive[num_preds] <- lapply(data_subset_naive[num_preds], function(x) as.numeric(scale(x)))
+  
+  # 3. Split Data (80/20 by PID)
+  set.seed(123)
+  split_naive <- group_initial_split(data_subset_naive, group = PID, prop = 0.8)
+  train_naive <- training(split_naive)
+  test_naive  <- testing(split_naive)
+  
+  train_id_naive <- as.character(train_naive$PID)
+  train_x_naive  <- as.data.frame(lapply(train_naive[, all_preds_naive], as.numeric))
+  train_y_naive  <- train_naive[[log_out]]
+  
+  # 4. Fit Mixed Effects Random Forest
+  set.seed(2730321)
+  rf_fit_naive <- MixRF(Y = train_y_naive, X = train_x_naive, 
+                        random = "(1|PID)", data = train_naive)
+  imm_rf_final_fits_naive[[response]] <- rf_fit_naive
+  
+  # 5. Predict and Evaluate
+  test_x_naive <- as.data.frame(lapply(test_naive[, all_preds_naive], as.numeric))
+  preds_naive  <- predict(rf_fit_naive$forest, test_x_naive)
+  actuals_naive <- test_naive[[log_out]]
+  
+  r2_naive   <- cor(actuals_naive, preds_naive)^2
+  rmse_naive <- Metrics::rmse(actuals_naive, preds_naive)
+  
+  imm_rf_performance_naive <- rbind(imm_rf_performance_naive, data.frame(
+    Outcome = response, Pseudo_R2 = r2_naive, RMSE = rmse_naive
+  ))
+  
+  # 6. Direction Check for Naive Group
+  dir_check_naive <- sapply(all_preds_naive, function(p) {
+    feature_vec <- train_naive[[p]]
+    if (is.numeric(feature_vec)) {
+      return(cor(feature_vec, train_y_naive, method = "spearman", use = "complete.obs"))
+    } else {
+      levs <- unique(na.omit(feature_vec))
+      if (length(levs) == 2) {
+        m1 <- mean(train_y_naive[feature_vec == levs[1]], na.rm = TRUE)
+        m2 <- mean(train_y_naive[feature_vec == levs[2]], na.rm = TRUE)
+        return(m2 - m1)
+      } else { return(0) }
+    }
+  })
+  
+  # 7. Importance Plot (Naive)
+  imp_vals_naive <- rf_fit_naive[["forest"]][["importance"]]
+  imp_df_naive <- data.frame(
+    Variable = rownames(imp_vals_naive),
+    Importance = as.numeric(imp_vals_naive),
+    Direction = dir_check_naive[rownames(imp_vals_naive)]
+  ) %>% arrange(desc(Importance))
+  
+  imm_rf_importance_plots_naive[[response]] <- ggplot(imp_df_naive, aes(x = reorder(Variable, Importance), y = Importance, fill = Direction)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    scale_fill_gradient2(low = "dodgerblue4", mid = "snow2", high = "firebrick3", midpoint = 0) +
+    labs(title = paste(response, "(Naive) Importance"), x = NULL, y = "Gini Importance") +
+    theme_minimal()
+
+  # 8. Performance Plot (Naive)
+  imm_rf_prediction_plots_naive[[response]] <- ggplot(data.frame(Obs = actuals_naive, Pred = preds_naive), aes(x = Obs, y = Pred)) +
+    geom_point(alpha = 0.6, color = "darkgreen") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "darkred") +
+    labs(title = paste(response, "(Naive) Performance"),
+         subtitle = paste("R²:", round(r2_naive, 3), "| RMSE:", round(rmse_naive, 3)),
+         x = "Observed", y = "Predicted") +
+    theme_minimal()
+  
+  message(paste0("Naive RF Success: ", response))
+}
+
+print(imm_rf_performance_naive)
 ```
 
 #### Monocytes Mediation DAG
