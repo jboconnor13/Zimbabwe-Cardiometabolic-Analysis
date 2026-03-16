@@ -85,6 +85,7 @@ met_vars <- c("HDL",
   #Total_Drinks
   #Total_Snacks
 
+
 confs <- c("Visit_Age",
            "Location",
            "BMI",
@@ -669,70 +670,69 @@ complete_grid <- expand.grid(
 plot_tile_data <- complete_grid %>%
   left_join(master_selection, by = c("Predictor", "Outcome", "Method")) %>%
   mutate(
-    # Create the outline type
     Outline_Type = case_when(
       Sig == "Significant" ~ "Solid (p < 0.05)",
       !is.na(Estimate) ~ "Dashed (Selected)",
       TRUE ~ "None"
     ),
-    # Ensure Method factor order
     Method = factor(Method, levels = rev(c("Backward", "Forward", "Both", "Lasso", "VSURF"))),
-    # Convert Method to numeric for geom_rect positioning
     y_idx = as.numeric(Method)
   )
 
-# Ensure your factor levels for Predictor are identical across all data
+# Clean outcome names for matching the logic in your request
 plot_tile_data <- plot_tile_data %>%
-  mutate(Predictor = factor(Predictor, levels = confs))
+  mutate(
+    DisplayOutcome = gsub("_log", "", Outcome),
+    DisplayOutcome = gsub("Trig", "Triglycerides", DisplayOutcome),
+    DisplayOutcome = gsub("DL", "DL-C", DisplayOutcome)
+  )
 
-plot_tile_data$DisplayOutcome <- gsub("_log","",
-plot_tile_data$Outcome) 
-
-plot_tile_data$DisplayOutcome <- gsub("Trig","Triglycerides",
-plot_tile_data$DisplayOutcome) 
-
-plot_tile_data$DisplayOutcome <- gsub("DL","DL-C",
-plot_tile_data$DisplayOutcome) 
-
+# 2. Logic to Bold Selected Approaches
+# We create a helper column to identify if a Method is the "Chosen" one for that Facet
+plot_tile_data <- plot_tile_data %>%
+  mutate(
+    is_selected_approach = case_when(
+      DisplayOutcome == "Glucose" & Method == "Both" ~ TRUE,         # "Both" is the Stepwise result
+      DisplayOutcome == "Triglycerides" & Method == "Both" ~ TRUE,  # "Both" is the Stepwise result
+      DisplayOutcome == "HDL-C" & Method == "VSURF" ~ TRUE,
+      DisplayOutcome == "LDL-C" & Method == "VSURF" ~ TRUE,
+      TRUE ~ FALSE
+    )
+  )
 
 conf_heatmap <- ggplot(plot_tile_data, aes(x = Predictor, y = Method)) +
-  # 1. The Background Fill (Continuous Scale)
   geom_tile(aes(fill = Estimate), color = "white") +
   
-  # 2. The SIGNIFICANT Outlines (Solid Black)
-  # We filter the data inside the geom so it only draws where p < 0.05
+  # Highlight the background of the selected method row slightly (optional but helpful)
+  geom_rect(data = filter(plot_tile_data, is_selected_approach & Predictor == confs[1]),
+            aes(xmin = -Inf, xmax = Inf, ymin = y_idx - 0.5, ymax = y_idx + 0.5),
+            fill = "black", alpha = 0.2, inherit.aes = FALSE) +
+
+  # Significant and Selected Outlines
   geom_tile(data = filter(plot_tile_data, Sig == "Significant"),
             fill = NA, color = "black", size = 0.8, linetype = "solid") +
-  
-  # 3. The SELECTED (but non-sig) Outlines (Dashed Black)
   geom_tile(data = filter(plot_tile_data, !is.na(Estimate) & Sig != "Significant"),
             fill = NA, color = "black", size = 0.5, linetype = "dashed") +
 
-  # Continuous Color Scale
-  scale_fill_gradient2(low = "#e34a33", mid = "white", high = "#2b8cbe", 
+  scale_fill_gradient2(high = "#e34a33", mid = "white", low = "#2b8cbe", 
                        midpoint = 0, na.value = "#f0f0f0",
                        name = "Coefficient Weight") +
                        
   facet_grid(DisplayOutcome ~ ., scales = "free_y", space = "free_y") +
   theme_minimal() +
-  labs(
-    title = "Confounder Selection Landscape",
-    x = "Potential Confounders",
-    y = "Selection Method",
-    tag="A"
-  ) +
+  labs(title = "Confounder Selection Landscape", x = "Potential Confounders", y = "Selection Method", tag="A") +
   theme(
+    plot.title = element_text(size = 20),
     axis.text.x = element_text(size=15, angle = 45, hjust = 1),
-    axis.text.y= element_text(size=15),
+    # Note: Vectorized face labeling in theme() doesn't play perfectly with facets, 
+    # so we rely on the visual indicator or manual grob editing if strictly needed.
+    # However, the geom_rect above provides the visual "bolding" of the row.
+    axis.text.y = element_text(size=15), 
     axis.title.x = element_text(size=15),
     axis.title.y = element_text(size=15),
-    title=element_text(size=20),
-    legend.title = element_text(size=15),
     strip.text.y = element_text(size=15, angle = 0, face = "bold"),
-    panel.spacing = unit(0.5, "lines"),
-    plot.tag = element_text(size=25),
-    legend.position = "right",
-    panel.grid = element_blank()
+    panel.grid = element_blank(),
+     plot.tag = element_text(size = 25)
   )
 
 # Combine all performance summaries
@@ -863,13 +863,14 @@ met_conf_data <- base_t1_model[non_NA_rows, confs]
 met_ord_dist <- vegdist(met_ord_data, method = "euclidean", na.rm = TRUE, scale = TRUE)
 
 # --- 2. ADONIS (Permutational MANOVA) ---
-adonis_results <- data.frame(Confounder = confs, pval = NA)
+adonis_results <- data.frame(Confounder = confs, pval = NA, R2=NA)
 
 for (r in 1:nrow(adonis_results)) {
   var_v <- adonis_results$Confounder[r]
   formula_v <- as.formula(paste0("met_ord_dist ~ ", var_v))
   adonis_v <- adonis2(formula_v, data = met_conf_data, method = "euclidean")
   adonis_results$pval[r] <- adonis_v$`Pr(>F)`[1]
+  adonis_results$R2[r] <- adonis_v$R2[1]
 }
 
 adonis_results$p.signif <- add_asterisks(adonis_results$pval)

@@ -1,0 +1,300 @@
+---
+title: "Cardiometabolic Differences and Changes"
+author: "J. O'Connor"
+date: "2025-09-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Cardiometabolic Differences and Changes
+
+This markdown completed the analysis comparing cardiometabolic markers across groups and looking at longitudinal changes 
+
+### Data Loading
+
+We load all the data of interest
+
+```{r data_load, echo=FALSE}
+#All Metadata objects have been stored in one location
+metadata_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/metadata_objects.RDS")
+
+  #base: all processed metadata (including 16S and 18S add ons)
+  base <- metadata_objects$base
+
+#We filter to include only baseline values
+  base_t1 <- base %>%
+              filter(Week==0)
+
+  
+
+```
+
+### Normality Asssesment 
+
+Clinical variables are selected and tested for normality. 
+
+```{r Normality, echo=FALSE, message=FALSE, warning=FALSE}
+#All base_t1line variables of interest are pulled out 
+#Categorical Variables
+myvars_cat <- c("Location","Gender","BlastocystisPresent_rare")
+
+#Continuous variables
+myvars_cont <- c("Visit_Age", "BMI", "HDL_mg-dL", "LDL_mg-dL", "Trig_mg-dL", "Glucose_mg-dL", "IL-6_pg_mL", "CRP_mg_L", "HIV-1_viral_load", "Faith_Diversity", "Shannon_Diversity","Cotri_Length_Month","CD4+_count")
+
+myvars_all <- c(myvars_cat,myvars_cont)
+
+
+#Normality is assessed 
+##Blank vectors are generated and filled with normal and not normal variables 
+myvars_cont_norm <- c()
+myvars_cont_non_norm <- c()
+
+#Below Shapiro's tests are used for normality of all continuous variables
+for (j in 1:length(myvars_cont)) {
+  #Variable selected and data pulled 
+  var_j <- myvars_cont[j]
+  var_j_col <- which(colnames(base_t1)==var_j)
+  base_t1[,var_j_col] <- as.numeric(unlist(base_t1[,var_j_col]))
+  
+  #Normality is assessed by a Shapiro test
+  shap.j <- shapiro.test(as.numeric(unlist(base_t1[,var_j_col])))
+  shap.j.p <- shap.j$p.value 
+  
+  #If the p value is under 0.05 it is not normal otherwise it is normal 
+  if (shap.j.p <0.05) {
+    myvars_cont_non_norm <- append(myvars_cont_non_norm, var_j)
+  } else {
+    myvars_cont_norm <- append(myvars_cont_norm, var_j)
+  }
+}
+
+
+#Below we get an indication of which are normal and which are not 
+
+if (length(myvars_cont_norm)>0) {
+  if (length(myvars_cont_norm)>1) {
+    and_var <- myvars_cont_norm[length(myvars_cont_norm)]
+    base_t1_vars <- setdiff(myvars_cont_norm, and_var)
+    base_t1_vars_str <- paste(base_t1_vars, collapse =", ")
+    and_var_str <- paste0(", and", and_var)
+    print(paste0("Variables ", base_t1_vars_str, and_var_str, " are normally distributed")) 
+  } else {
+    print(paste0(myvars_cont_norm, " is normally distributed")) 
+  }
+}
+
+if (length(myvars_cont_non_norm)>0) {
+  if (length(myvars_cont_non_norm)>1) {
+    and_var <- myvars_cont_non_norm[length(myvars_cont_non_norm)]
+    base_t1_vars <- setdiff(myvars_cont_non_norm, and_var)
+    base_t1_vars_str <- paste(base_t1_vars, collapse =", ")
+    and_var_str <- paste0(", and ", and_var)
+    print(paste0("Variables ", base_t1_vars_str, and_var_str, " are NOT normally distributed")) 
+  } else {
+    print(paste0(myvars_cont_non_norm, " is NOT normally distributed")) 
+  }
+}
+
+
+```
+
+###Data Group Quantification and Table Generation
+
+base_t1line data is pulled and tables are generated with statistics reflecting normality 
+
+```{r Quantification and Table Generation, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+#base_t1line tables are generated 
+
+#Main Group
+main_tab_1_pre <- CreateTableOne(vars=myvars_all, strata="Cohort", data=base_t1, argsNonNormal = c(myvars_cont_non_norm), argsNormal = c(myvars_cont_norm), includeNA=FALSE)
+
+
+
+##Additional pairwise comparisons
+base_t1.gp12 <- base_t1[which(as.character(base_t1$Cohort) %in% c("Naïve","Exp")),]
+base_t1.gp13 <- base_t1[which(as.character(base_t1$Cohort) %in% c("Naïve","HC")),]
+base_t1.gp23 <- base_t1[which(as.character(base_t1$Cohort) %in% c("Exp", "HC")),]
+
+##Additional pairwise tables are made for downstream analysis
+
+#Allvariables are put into one group c
+main_tab_1.gp12_pre <- CreateTableOne(vars=myvars_all, strata="Cohort", data=base_t1.gp12, argsNonNormal = myvars_cont_non_norm, argsNormal = myvars_cont_norm)
+main_tab_1.gp13_pre <- CreateTableOne(vars=myvars_all, strata="Cohort", data=base_t1.gp13, argsNonNormal = myvars_cont_non_norm, argsNormal = myvars_cont_norm)
+main_tab_1.gp23_pre <- CreateTableOne(vars=myvars_all, strata="Cohort", data=base_t1.gp23, argsNonNormal = myvars_cont_non_norm, argsNormal = myvars_cont_norm)
+
+#For our visualization we are going to change the mean (SD)s to meadian (IQRs). To do this the print command is used and specify the all contonuus variables are not normal (even though Shannon is)
+
+main_tab_1.gp12 <- as.data.frame(print(main_tab_1.gp12_pre, nonnormal=myvars_cont))
+main_tab_1.gp13 <- as.data.frame(print(main_tab_1.gp13_pre, nonnormal=myvars_cont))
+main_tab_1.gp23 <- as.data.frame(print(main_tab_1.gp23_pre, nonnormal=myvars_cont))
+
+main_tab_1 <- as.data.frame(print(main_tab_1_pre, nonnormal=myvars_cont))
+```
+
+
+###Post HOC testing
+
+P-values are adjusted for multiple comparisons
+
+```{r Post HOC, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+
+#We set viral load to zero for our healthy controls
+base_t1$`HIV-1_viral_load`[which(as.character(base_t1$Cohort)=="HC")] <- 0
+
+#We generate a blank data frame that we add to which will include IQRs of the groups then adjusted p-values
+cont_table <- data.frame("Variable"=c(),
+                         "Naïve"=c(),
+                         "Exp"=c(),
+                         "HC"=c(),
+                         "Naïve_Exp"=c(),
+                         "Naïve_HC"=c(),
+                         "Exp_HC"=c() 
+                         )
+
+#Now we go through each variable and do the post hoc testing
+for (j in 1:length(myvars_cont)) {
+  var_j <- myvars_cont[j]
+  
+  #We generate a simple temproray data file
+  data_temp_j <- base_t1[which(!is.na(base_t1[,var_j])),which(colnames(base_t1) %in% c("Cohort",var_j))]
+  
+  #We name the continuous variable 
+  colnames(data_temp_j)[which(colnames(data_temp_j)==var_j)] <- "Value"
+  
+  #Make sure it is numeric
+  data_temp_j$Value <- as.numeric(data_temp_j$Value)
+  
+  
+  #If the variable is not normal ...
+  if (var_j %in% myvars_cont_non_norm) {
+  #Dunn's test performed on Kruskall wallace using the dunn_test fuction
+  stat_j <- dunn_test(data=data_temp_j,
+                      Value ~Cohort,
+                      p.adjust.method = "bonferroni")
+  
+  #We pull the pairwise p-values doing NA is there is no value for any pair
+pg12 <- (function(x) if(length(x) == 0) NA else x)(stat_j$p.adj[which(stat_j$group1 %in% c("Naïve","Exp") & stat_j$group2 %in% c("Naïve","Exp"))])
+pg13 <- (function(x) if(length(x) == 0) NA else x)(stat_j$p.adj[which(stat_j$group1 %in% c("Naïve","HC") & stat_j$group2 %in% c("Naïve","HC"))])
+pg23 <- (function(x) if(length(x) == 0) NA else x)(stat_j$p.adj[which(stat_j$group1 %in% c("Exp","HC") & stat_j$group2 %in% c("Exp","HC"))])
+  
+  }
+  
+  #If the variable is normal...
+  if (var_j %in% myvars_cont_norm) {
+  
+  # Parametric pairwise t-tests with Bonferroni adjustment
+  stat_j <- pairwise.t.test(data_temp_j$Value, data_temp_j$Cohort, p.adjust.method = "bonferroni")
+
+# To pull the p-values from this matrix:
+pg12 <- (function(x) if(length(x) == 0 || is.na(x)) NA else x)(stat_j$p.value["Exp","Naïve"])
+pg13 <- (function(x) if(length(x) == 0 || is.na(x)) NA else x)(stat_j$p.value["HC", "Naïve"])
+pg23 <- (function(x) if(length(x) == 0 || is.na(x)) NA else x)(stat_j$p.value["HC", "Exp"])
+  
+
+  }
+  
+  #We pull the varaible rows from the Median IQR tables generated above
+  
+  var_row <- which(substr(rownames(main_tab_1),1,nchar(var_j))==var_j)
+  
+  #We add those median values to the conintuous table
+  
+  cont_table_row_j<- data.frame("Variable"=var_j,
+                         "Naïve"=main_tab_1$Naïve[var_row],
+                         "Exp"=main_tab_1$Exp[var_row],
+                         "HC"=main_tab_1$HC[var_row],
+                         "Naïve_Exp"=pg12,
+                         "Naïve_HC"=pg13,
+                         "Exp_HC"=pg23 
+                         )
+  
+  cont_table <- rbind(cont_table,cont_table_row_j)
+
+}
+
+#The same is done for the categorical Variables
+
+cat_table <- data.frame("Variable"=c(),
+                         "Naïve"=c(),
+                         "Exp"=c(),
+                         "HC"=c(),
+                         "Naïve_Exp"=c(),
+                         "Naïve_HC"=c(),
+                         "Exp_HC"=c() 
+                         )
+
+#We will pull out subsets and do chi-squares followed by p value adjustments
+for (k in myvars_cat) {
+ #We pull the combo names from the p adjusted table to match the columns
+ comb_1 <- c("Exp","Naïve")
+ comb_2 <- c("HC","Naïve")
+ comb_3 <- c("Exp","HC")
+ #We then generate subsets of data
+ data_temp_k.gp_comb_1 <- base_t1[which(as.character(base_t1$Cohort) %in% comb_1 & !is.na(base_t1[,k])),which(colnames(base_t1) %in% c("Cohort",k))]
+ data_temp_k.gp_comb_2 <- base_t1[which(as.character(base_t1$Cohort) %in% comb_2 & !is.na(base_t1[,k])),which(colnames(base_t1) %in% c("Cohort",k))]
+ data_temp_k.gp_comb_3 <- base_t1[which(as.character(base_t1$Cohort) %in% comb_3 & !is.na(base_t1[,k])),which(colnames(base_t1) %in% c("Cohort",k))]
+ 
+ #We nrename columns to generalize for the chiquare
+ colnames(data_temp_k.gp_comb_1)[which(colnames(data_temp_k.gp_comb_1)==k)] <- "Value"
+ colnames(data_temp_k.gp_comb_2)[which(colnames(data_temp_k.gp_comb_2)==k)] <- "Value"
+ colnames(data_temp_k.gp_comb_3)[which(colnames(data_temp_k.gp_comb_3)==k)] <- "Value"
+ 
+ #We perform the chi-square
+ chi_k_comb_1 <- chisq.test(data_temp_k.gp_comb_1$Cohort,data_temp_k.gp_comb_1$Value)
+ chi_k_comb_2 <- chisq.test(data_temp_k.gp_comb_2$Cohort,data_temp_k.gp_comb_2$Value)
+ chi_k_comb_3 <- chisq.test(data_temp_k.gp_comb_3$Cohort,data_temp_k.gp_comb_3$Value)
+ 
+ bon_adjust_k <- p.adjust(c(chi_k_comb_1$p.value,chi_k_comb_2$p.value,chi_k_comb_3$p.value), method="bonferroni")
+
+
+   var_row <- which(substr(rownames(main_tab_1),1,nchar(k))==k)
+     
+  #We add those median values to the conintuous table
+  
+  cat_table_row_k<- data.frame("Variable"=k,
+                         "Naïve"=main_tab_1$Naïve[var_row],
+                         "Exp"=main_tab_1$Exp[var_row],
+                         "HC"=main_tab_1$HC[var_row],
+                         "Naïve_Exp"= bon_adjust_k[1],
+                         "Naïve_HC"= bon_adjust_k[2],
+                         "Exp_HC"=bon_adjust_k[3] 
+                         )
+  
+  cat_table <- rbind(cat_table,cat_table_row_k)
+ 
+}
+
+```
+
+
+
+
+
+###Final Table Generation
+
+Now we ajoin the adjusted pairwise values to the main table
+
+```{r Final Table, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+#We generate a first line with the number of samples 
+n_gp1 <- nrow(base_t1[which(as.character(base_t1$Cohort)=="Naïve"),])
+n_gp2 <- nrow(base_t1[which(as.character(base_t1$Cohort)=="Exp"),])
+n_gp3 <- nrow(base_t1[which(as.character(base_t1$Cohort)=="HC"),]) 
+
+comb_tab_1_pre <- as.data.frame(t(c("Sample Number", n_gp1, n_gp2, n_gp3," "," ", " ")))
+colnames(comb_tab_1_pre)<- colnames(cat_table)
+
+final_tab_1 <- rbind(comb_tab_1_pre,cat_table,cont_table)
+
+write.csv(final_tab_1, file="../../Data/Metadata/Exported_Table1.csv")
+
+```
+

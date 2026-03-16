@@ -1,0 +1,759 @@
+---
+title: "MICOM FLux"
+author: "J. O'Connor"
+date: "2025-09-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+###Library Loading
+```{r cars}
+
+#Initial Libraries are loaded
+library(clusterProfiler)
+library(fgsea)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(limma)
+library(edgeR)
+library(compositions) #Version
+library(readxl)
+library(datasets)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(ggfortify)
+library(ggpubr)
+library(stringr)
+library(ggrepel)
+library(mice)
+library(vegan)
+library(ape)
+library(ggpubr)
+library(rstatix)
+library(cowplot)
+library(pheatmap)
+library(randomForest)
+library(VSURF)
+library(ggplot2)
+library (ggpubr)
+library(tidyr)
+library(reshape2)
+library(readxl)
+library(gridExtra)
+library(grid)
+library(ggplot2)
+library(lattice)
+library(datasets)
+library(ggplot2)
+library(dplyr)
+library(ggfortify)
+library(factoextra)
+library(httr)
+library(jsonlite)
+library(stringr)
+library(readxl)
+library(datasets)
+library(ggplot2)
+library(dplyr)
+library(lme4)
+library(lmerTest)
+library(afex)
+library(phyloseq)
+library(qiime2R)
+library(vegan)
+library(ape)
+library(ggpubr)
+library(rstatix)
+library(cowplot)
+library(gridExtra)
+library(ggpubr)
+library(jsonlite)
+library(qiime2R)
+library(phyloseq)
+library(readxl)
+library(datasets)
+library(ggplot2)
+library(dplyr)
+library(lme4)
+library(lmerTest)
+library(afex)
+library(microbiome)
+library(microshades)
+library(speedyseq)
+library(compositions) 
+library(tidyr)
+library(ggforce)
+library(ggh4x)
+library(RColorBrewer)
+library(pheatmap)
+library(ggrepel)
+library(EnhancedVolcano)
+library(mice)
+library(biomformat)
+library(glmmLasso)
+library(stats)
+library(ggplot2)
+library(limma)
+library(edgeR)
+library(KEGGREST)
+library(MicrobiomeProfiler)
+library(qtl2)
+
+```
+
+###Function Loading
+```{r}
+# Necessary Functions are Sourced 
+function_files <- list.files(paste0("../../Functions"), pattern = "\\.R$", full.names = TRUE)
+lapply(function_files, source)
+
+```
+
+
+
+### Data Loading
+
+```{r}
+
+#All Metadata objects have been stored in one location
+metadata_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/metadata_objects.RDS")
+
+#Metdata objects
+  #base: all processed metadata
+  base <- metadata_objects$base
+  
+#18S Data
+euk_18S_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/euk_18S_objects.RDS")
+ 
+exchanges <- read_csv("~/micom-time-series/data/growth_rates/growth_ZM_16S_AD_agora201_gurobi_08/exchanges.csv")
+
+exchanges$SampleID <- exchanges$sample_id
+
+  
+#Previusly Determined confounders are loaded
+conf_vars <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/conf_vars.RDS")
+
+#Confounders
+  #conf_vars_all: All confounders in one vector
+  #conf_vars_HDL: Confounders of HDL
+  #conf_vars_LDL: Confounders of LDL
+  #conf_vars_Trig: Confounders of Trig
+  #conf_vars_Glucose: Confounders of Glucose
+  conf_vars_all <- conf_vars$conf_vars_all
+  conf_vars_HDL <- conf_vars$conf_vars_HDL
+  conf_vars_LDL <- conf_vars$conf_vars_LDL
+  conf_vars_Trig <- conf_vars$conf_vars_Trig
+  conf_vars_Glucose <- conf_vars$conf_vars_Glucose
+  
+  #All 18S objects have been stored in one location
+euk_18S_objects <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Data/R_Data/euk_18S_objects.RDS")
+
+#18S objects
+  #base with 18S: clinical data combined with 18S abundances
+  base_with_18S <- euk_18S_objects$base_with_18S
+  #Euk_18S_mdf: 18S mdf data frmae
+  Euk_18S_mdf <- euk_18S_objects$Euk_18S_mdf
+  
+  
+  exchanges_met <- inner_join(exchanges, base_with_18S, by="SampleID")
+
+  
+  
+  
+#Optimization (16S)
+growth_rates_06_16S <- read_csv("~/micom-time-series/data/growth_rates/growth_ZM_16S_AD_agora201_gurobi_06/growth_rates.csv")
+
+growth_rates_07_16S <- read_csv("~/micom-time-series/data/growth_rates/growth_ZM_16S_AD_agora201_gurobi_07/growth_rates.csv")
+
+growth_rates_08_16S <- read_csv("~/micom-time-series/data/growth_rates/growth_ZM_16S_AD_agora201_gurobi_08/growth_rates.csv")
+
+growth_rates_09_16S <- read_csv("~/micom-time-series/data/growth_rates/growth_ZM_16S_AD_agora201_gurobi_09/growth_rates.csv")
+
+growth_rates_10_16S <- read_csv("~/micom-time-series/data/growth_rates/growth_ZM_16S_AD_agora201_gurobi_10/growth_rates.csv")
+
+tradeoff_all <- rbind(growth_rates_06_16S,growth_rates_07_16S,growth_rates_08_16S,growth_rates_09_16S,growth_rates_10_16S)
+
+
+```
+
+
+#TSNE
+```{r}
+
+library(dplyr)
+library(Rtsne)
+library(ggplot2)
+library(plotly)
+
+exchanges_met$DisplayWeek <- paste0(exchanges_met$Week, " Weeks")
+
+micom_tot_tax <- exchanges_met %>%
+                      group_by(PID,SampleID,taxon,Cohort,HIV_Status,Treatment,LDL,HDL,Trig,Glucose,metabolite, direction,Blastocystis_rare,BlastocystisCategory, Visit_Age, BMI, Location, Total_Grain, Total_Fast_Food, DisplayWeek) %>%
+                      summarise(total_flux = sum(flux, na.rm = TRUE), .groups = "drop")
+
+
+micom_tot_wide <- pivot_wider(micom_tot_tax,
+                                  names_from = "metabolite",
+                                  values_from = "total_flux",
+                                  values_fill = 0)
+
+
+micom_tot_wide_imp <- micom_tot_wide [which(micom_tot_wide $direction=="import" & micom_tot_wide $taxon!="medium"),]
+
+ann_data_pre_imp <- micom_tot_wide_imp[,c(1:19)]
+
+ord_data_pre_imp <- micom_tot_wide_imp[,c(20:406)]
+
+
+ord_data_imp <- ord_data_pre_imp[which(!(duplicated(ord_data_pre_imp))),]
+
+ann_data_imp <- ann_data_pre_imp[which(!(duplicated(ord_data_pre_imp))),]
+
+set.seed(67829489)
+tsne_results_imp <- Rtsne(ord_data_imp, dims = 2, perplexity = 5, verbose = TRUE, max_iter = 1500)
+
+tsne_coords_imp <- as.data.frame(tsne_results_imp$Y)
+colnames(tsne_coords_imp) <- c("tsne1", "tsne2")
+
+# 4. Calculate Variable Loadings (Correlate features with t-SNE components)
+loadings_imp <- cor(ord_data_imp, tsne_coords_imp)
+loadings_imp <- as.data.frame(loadings_imp)
+loadings_imp$var <- rownames(loadings_imp)
+loadings_imp$dist <- NA
+
+for (j in 1:nrow(loadings_imp)) {
+  x <- loadings_imp$tsne1[j]
+  y <- loadings_imp$tsne2[j]
+  dist <- ((x^2)+(y^2))^.5
+  loadings_imp$dist[j] <- dist
+}
+
+loading_top10_imp <- loadings_imp[which(loadings_imp$dist>.311),]
+
+loading_top10_imp$xstart <- 0
+loading_top10_imp$ystart <- 0
+loading_top10_imp$xend <- loading_top10_imp$tsne1*240
+loading_top10_imp$yend <- loading_top10_imp$tsne2*240
+
+tsne_df_imp <- data.frame(
+  X = tsne_results_imp$Y[, 1],
+  Y = tsne_results_imp$Y[, 2],
+  taxon <- ann_data_imp$taxon,
+  Cohort <- ann_data_imp$Cohort,
+  HIV <- ann_data_imp$HIV_Status,
+  Treatment <- ann_data_imp$Treatment,
+  Blast <- ann_data_imp$BlastocystisCategory,
+  DW <- ann_data_imp$DisplayWeek
+  
+)
+
+colnames(tsne_df_imp) <- c("X","Y","taxon","Cohort","HIV","Treatment","Blast", "DW")
+
+
+micom_tot_tax$abs_total_flux <- abs(micom_tot_tax$total_flux)
+
+OtherTaxa_imp <- unique(other_generator(micom_tot_tax, "taxon","Top Median",69,"abs_total_flux","PID"))
+
+select_taxa_imp <- setdiff(OtherTaxa_imp$V1,c("medium","Other"))
+
+tsne_df_imp$DisplayTaxa <- "Other"
+
+for(r in 1:nrow(tsne_df_imp)) {
+  gen_r <- tsne_df_imp$taxon[r]
+  if (gen_r %in% select_taxa_imp) {
+    tsne_df_imp$DisplayTaxa[r] <- gen_r
+  }
+}
+
+fecal.qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+fecal.col_vector_pre = unlist(mapply(brewer.pal, fecal.qual_col_pals$maxcolors, rownames(fecal.qual_col_pals)))
+fecal.col_vector <- fecal.col_vector_pre[1:69]
+
+
+tsne_biplot_imp <- ggplot(tsne_df_imp, aes(x = X, y = Y)) +
+  geom_point(size = 1.5) +
+  labs(
+    x = "t-SNE Dimension 1",
+    y = "t-SNE Dimension 2",
+    color="Genus",
+    tag="A"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 20),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    strip.text.x = element_text(size=15),
+    strip.text.y = element_text(size=15),
+    plot.tag = element_text(size=25),
+    ggh4x.facet.nestline = element_blank(),
+    strip.background.x = element_rect(color="black", fill="gray", linetype="solid"),
+    strip.background.y = element_rect(color="black", fill="gray", linetype="solid"))+
+    geom_segment(data = loading_top10_imp, aes(x = xstart, y = ystart, xend = xend, yend = yend),arrow = arrow(length = unit(0.3, "cm")), color="red", inherit.aes = FALSE)+
+  geom_label_repel(data=loading_top10_imp, aes(x = xend, y = yend, label=var), size=4, color="red", fill="white", inherit.aes = FALSE)
+
+
+tsne_biplot_imp_blast <- ggplot(tsne_df_imp, aes(x = X, y = Y, color=Blast)) +
+  geom_point(size = 1.5) +
+  stat_ellipse(geom="polygon",
+               alpha=0.25)+
+  labs(
+    x = "t-SNE Dimension 1",
+    y = "t-SNE Dimension 2",
+    color="Genus",
+    tag="A"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 20),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    strip.text.x = element_text(size=15),
+    strip.text.y = element_text(size=15),
+    plot.tag = element_text(size=25),
+    ggh4x.facet.nestline = element_blank(),
+    strip.background.x = element_rect(color="black", fill="gray", linetype="solid"),
+    strip.background.y = element_rect(color="black", fill="gray", linetype="solid"))+
+    geom_segment(data = loading_top10_imp, aes(x = xstart, y = ystart, xend = xend, yend = yend),arrow = arrow(length = unit(0.3, "cm")), color="red", inherit.aes = FALSE)+
+  geom_label_repel(data=loading_top10_imp, aes(x = xend, y = yend, label=var), size=4, color="red", fill="white", inherit.aes = FALSE)
+
+tsne_plot_imp <- ggplot(tsne_df_imp, aes(x = X, y = Y, color = factor(DisplayTaxa))) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c(fecal.col_vector, "gray"))+
+  labs(
+    x = "t-SNE Dimension 1",
+    y = "t-SNE Dimension 2",
+    color="Genus",
+    tag="B"
+  ) +
+  theme_minimal() +
+  guides(color = guide_legend(ncol = 2))+
+  theme(
+    plot.title = element_text(size = 20),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    strip.text.x = element_text(size=15),
+    strip.text.y = element_text(size=15),
+    legend.text = element_text(size=12),
+    legend.title = element_text(size=15),
+    plot.tag = element_text(size=25),
+    ggh4x.facet.nestline = element_blank(),
+    strip.background.x = element_rect(color="black", fill="gray", linetype="solid"),
+    strip.background.y = element_rect(color="black", fill="gray", linetype="solid"))+
+  facet_nested(cols=vars(tsne_df_imp$Cohort),
+               rows=vars(tsne_df_imp$DW))
+
+tsne_plot_imp_Blast <- ggplot(tsne_df_imp, aes(x = X, y = Y, color = factor(DisplayTaxa))) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c(fecal.col_vector, "gray"))+
+  labs(
+    x = "t-SNE Dimension 1",
+    y = "t-SNE Dimension 2",
+    color="Genus",
+    tag="B"
+  ) +
+  theme_minimal() +
+  guides(color = guide_legend(ncol = 2))+
+  theme(
+    plot.title = element_text(size = 20),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    strip.text.x = element_text(size=15),
+    strip.text.y = element_text(size=15),
+    legend.text = element_text(size=12),
+    legend.title = element_text(size=15),
+    plot.tag = element_text(size=25),
+    ggh4x.facet.nestline = element_blank(),
+    strip.background.x = element_rect(color="black", fill="gray", linetype="solid"),
+    strip.background.y = element_rect(color="black", fill="gray", linetype="solid"))+
+  facet_nested(cols=vars(tsne_df_imp$Blast))
+
+tsne_imp_plot <- ggarrange(tsne_biplot_imp,tsne_plot_imp, nrow=1, widths=c(1,3))
+
+
+
+micom_tot_wide_exp <- micom_tot_wide [which(micom_tot_wide $direction=="export" & micom_tot_wide $taxon!="medium"),]
+
+ann_data_pre_exp <- micom_tot_wide_exp[,c(1:13)]
+
+ord_data_pre_exp <- micom_tot_wide_exp[,c(14:435)]
+
+
+ord_data_exp <- ord_data_pre_exp[which(!(duplicated(ord_data_pre_exp))),]
+
+ann_data_exp <- ann_data_pre_exp[which(!(duplicated(ord_data_pre_exp))),]
+
+set.seed(67829489)
+tsne_results_exp <- Rtsne(ord_data_exp, dims = 2, perplexity = 5, verbose = TRUE, max_iter = 1500)
+
+tsne_coords_exp <- as.data.frame(tsne_results_exp$Y)
+colnames(tsne_coords_exp) <- c("tsne1", "tsne2")
+
+# 4. Calculate Variable Loadings (Correlate features with t-SNE components)
+loadings_exp <- cor(ord_data_exp, tsne_coords_exp)
+loadings_exp <- as.data.frame(loadings_exp)
+loadings_exp$var <- rownames(loadings_exp)
+loadings_exp$dist <- NA
+
+for (j in 1:nrow(loadings_exp)) {
+  x <- loadings_exp$tsne1[j]
+  y <- loadings_exp$tsne2[j]
+  dist <- ((x^2)+(y^2))^.5
+  loadings_exp$dist[j] <- dist
+}
+
+loading_top10_exp <- loadings_exp[which(loadings_exp$dist>.15),]
+
+loading_top10_exp$xstart <- 0
+loading_top10_exp$ystart <- 0
+loading_top10_exp$xend <- loading_top10_exp$tsne1*120
+loading_top10_exp$yend <- loading_top10_exp$tsne2*120
+
+tsne_df_exp <- data.frame(
+  X = tsne_results_exp$Y[, 1],
+  Y = tsne_results_exp$Y[, 2],
+  taxon <- ann_data_exp$taxon,
+  Cohort <- ann_data_exp$Cohort,
+  HIV <- ann_data_exp$HIV_Status,
+  Treatment <- ann_data_exp$Treatment
+)
+
+colnames(tsne_df_exp) <- c("X","Y","taxon","Cohort","HIV","Treatment")
+
+
+
+select_taxa_exp <- select_taxa_imp
+
+tsne_df_exp$DisplayTaxa <- "Other"
+
+for(r in 1:nrow(tsne_df_exp)) {
+  gen_r <- tsne_df_exp$taxon[r]
+  if (gen_r %in% select_taxa_exp) {
+    tsne_df_exp$DisplayTaxa[r] <- gen_r
+  }
+}
+
+
+
+
+tsne_biplot_exp <- ggplot(tsne_df_exp, aes(x = X, y = Y)) +
+  geom_point(size = 1.5) +
+  labs(
+    x = "t-SNE Dimension 1",
+    y = "t-SNE Dimension 2",
+    color="Genus",
+    tag="C"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 20),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    strip.text.x = element_text(size=15),
+    strip.text.y = element_text(size=15),
+    plot.tag = element_text(size=25),
+    ggh4x.facet.nestline = element_blank(),
+    strip.background.x = element_rect(color="black", fill="gray", linetype="solid"),
+    strip.background.y = element_rect(color="black", fill="gray", linetype="solid"))+
+  geom_segment(data = loading_top10_exp, aes(x = xstart, y = ystart, xend = xend, yend = yend),arrow = arrow(length = unit(0.3, "cm")), color="red", inherit.aes = FALSE)+
+  geom_label_repel(data=loading_top10_exp, aes(x = xend, y = yend, label=var), size=4, color="red", fill="white", inherit.aes = FALSE)
+
+
+tsne_plot_exp <- ggplot(tsne_df_exp, aes(x = X, y = Y, color = factor(DisplayTaxa))) +
+  geom_point(size = 3) +
+  scale_color_manual(values=c(fecal.col_vector, "gray"))+
+  labs(
+    x = "t-SNE Dimension 1",
+    y = "t-SNE Dimension 2",
+    color="Genus",
+    tag="D"
+  ) +
+  theme_minimal() +
+  guides(color = guide_legend(ncol = 2))+
+  theme(
+    plot.title = element_text(size = 20),
+    axis.title.x = element_text(size=15),
+    axis.title.y = element_text(size=15),
+    strip.text.x = element_text(size=15),
+    strip.text.y = element_text(size=15),
+    legend.text = element_text(size=12),
+    legend.title = element_text(size=15),
+    plot.tag = element_text(size=25),
+    ggh4x.facet.nestline = element_blank(),
+    strip.background.x = element_rect(color="black", fill="gray", linetype="solid"),
+    strip.background.y = element_rect(color="black", fill="gray", linetype="solid"))+
+  facet_nested(cols=vars(tsne_df_exp$Cohort))
+
+tsne_exp_plot <- ggarrange(tsne_biplot_exp,tsne_plot_exp, nrow=1, widths=c(1,3))
+
+
+
+```
+
+
+#Statistics
+
+###Cross-Sectional States
+```{r}
+
+micom_tot_tax 
+micom_tot <- exchanges_met %>%
+                      group_by(PID,SampleID,Cohort,HIV_Status,Treatment,LDL,HDL,Trig,Glucose,metabolite, direction,BlastocystisCategory, Visit_Age,BMI, Location, Total_Grain, Total_Fast_Food,Blastocystis_rare, DisplayWeek) %>%
+                      summarise(total_flux = sum(flux, na.rm = TRUE), .groups = "drop")
+
+
+
+
+co_stats <- compare_means(total_flux~BlastocystisCategory, 
+                              data=micom_tot,
+                              group.by = c("metabolite","direction", "DisplayWeek", "Cohort"))
+  
+co_stats_tax <- compare_means(total_flux~Cohort, 
+                              data=micom_tot_tax,
+                              group.by = c("taxon","metabolite","direction"))
+  
+
+hiv_stats <- compare_means(total_flux~HIV_Status, 
+                              data=micom_tot,
+                              group.by = c("metabolite","direction"))
+  
+hiv_stats_tax <- compare_means(total_flux~HIV_Status, 
+                              data=micom_tot_tax,
+                              group.by = c("taxon","metabolite","direction"))
+
+trt_stats <- compare_means(total_flux~Treatment, 
+                              data=micom_tot,
+                              group.by = c("metabolite","direction"))
+  
+trt_stats_tax <- compare_means(total_flux~Treatment, 
+                              data=micom_tot_tax,
+                              group.by = c("taxon","metabolite","direction"))
+
+blast_stats <- compare_means(total_flux~BlastocystisCategory, 
+                              data=micom_tot,
+                              group.by = c("metabolite","direction"))
+  
+blast_stats_tax <- compare_means(total_flux~BlastocystisCategory, 
+                              data=micom_tot_tax,
+                              group.by = c("taxon","metabolite","direction"))
+
+
+
+```
+
+##Flux Differences by Metabolic Outcome
+
+####Linear Mixed Effects Models  - All Participants
+```{r}
+
+
+
+met_lmer_data <- pivot_wider(micom_tot,
+                             values_from = "total_flux",
+                             names_from = "metabolite",
+                             values_fill = 0)
+
+conf_vars_Blastocystis_rare <- c("HIV_Status","Treatment")
+
+conf_vars_BlastocystisCategory <- c("HIV_Status","Treatment")
+
+micom_flux_vars <- unique(micom_tot$metabolite)
+#metaboic variables are defined
+met_vars <- c("Blastocystis_rare")
+#We generate an linear mixed effects model data set to inlcude results
+micom_flux_lm_met_data <- unique(expand.grid(micom_flux_vars, met_vars))
+
+colnames(micom_flux_lm_met_data) <- c("Predictor","Outcome")
+#We generate fields for the statistics
+micom_flux_lm_met_data["pval"] <- NA
+micom_flux_lm_met_data["padj"] <- NA
+micom_flux_lm_met_data["coef"] <- NA
+micom_flux_lm_met_data["sig"] <- NA
+micom_flux_lm_met_data["percent_variance_exp"] <- NA
+
+for (k in 1:nrow(micom_flux_lm_met_data)) {
+  
+  #Response variable is pulled out
+  response <- as.character(micom_flux_lm_met_data$Outcome[k])
+  
+  #We pull the confounders for that variable
+  conf_r_pre <- get(paste0("conf_vars_",response))
+  
+  conf_r <- setdiff(conf_r_pre,c("Location"))
+  
+  #Predictor variable is pulled out
+  predictor <-  as.character(micom_flux_lm_met_data$Predictor[k])
+  #We add the confounders with the predictor
+  predictor_with_confs <- c(predictor,conf_r)
+  
+  
+  #We remove missing variables
+  data_r <- na.omit(met_lmer_data[,c(response,predictor_with_confs,"PID")])
+  colnames(data_r)[2] <- "predictor"
+  predictor_with_confs <- c("predictor",conf_r)
+  
+  if (min(sapply(data_r, function(x) length(unique(x)))>1)) {
+    # create full model 
+    ff <- as.formula(paste0(response,"~",paste0(predictor_with_confs, collapse="+"),"+(1|PID)")) 
+    fm <- lmer(ff,data = data_r)
+    
+    predict_fm <- predict(fm)
+    sum_fm <- summary(fm)
+    
+    #Below we calculate the R -suared value
+    #First total sum of squares
+    tss <- sum((unlist(data_r[,c(response)])-mean(unlist(data_r[,c(response)])))^2)
+    #Second residual sum of squares
+    rss <- sum((unlist(data_r[,c(response)])-predict_fm)^2)
+    #R-squared
+    r_squared <- 1-(rss/tss)
+    #Percent variance explained
+    pve <- r_squared*100
+    
+    micom_flux_lm_met_data$percent_variance_exp[k] <- pve
+    class(pve) <- "numeric"
+    
+    #We pull out the coefficinets
+    coef_fm <- as.data.frame(sum_fm$coefficients)
+    
+    micom_flux_lm_met_data$pval[k] <- coef_fm[2,5]
+    micom_flux_lm_met_data$coef[k] <- coef_fm[2,1] 
+  }
+  
+  
+  
+}
+
+for (m in met_vars) {
+  
+  micom_flux_lm_met_data$padj[which(micom_flux_lm_met_data$Outcome==m)] <- p.adjust(micom_flux_lm_met_data$pval[which(micom_flux_lm_met_data$Outcome==m)], method="fdr")
+  
+}
+
+```
+
+####Linear Mixed Effects Models  - Naive Participants
+```{r}
+
+
+micom_flux_lm_met_data_naive <- unique(expand.grid(micom_flux_vars, met_vars))
+
+colnames(micom_flux_lm_met_data_naive) <- c("Predictor","Outcome")
+#We generate fields for the statistics
+micom_flux_lm_met_data_naive["pval"] <- NA
+micom_flux_lm_met_data_naive["padj"] <- NA
+micom_flux_lm_met_data_naive["coef"] <- NA
+micom_flux_lm_met_data_naive["sig"] <- NA
+micom_flux_lm_met_data_naive["percent_variance_exp"] <- NA
+
+for (k in 1:nrow(micom_flux_lm_met_data_naive)) {
+  
+  #Response variable is pulled out
+  response <- as.character(micom_flux_lm_met_data_naive$Outcome[k])
+  
+  #We pull the confounders for that variable
+  conf_r_pre <- get(paste0("conf_vars_",response))
+  
+  conf_r <- setdiff(conf_r_pre,c("HIV_Status","Treatment","Location"))
+  
+  #Predictor variable is pulled out
+  predictor <-  as.character(micom_flux_lm_met_data_naive$Predictor[k])
+  #We add the confounders with the predictor
+  predictor_with_confs <- c(predictor,conf_r)
+  
+  #We remove missing variables
+  data_r <- na.omit(met_lmer_data[which(met_lmer_data$Cohort=="Naïve"),c(response,predictor_with_confs,"PID")])
+  
+  colnames(data_r)[2] <- "predictor"
+  predictor_with_confs <- c("predictor",conf_r)
+  
+  if (min(sapply(data_r, function(x) length(unique(x)))>1)) {
+    # create full model 
+    ff <- as.formula(paste0(response,"~",paste0(predictor_with_confs, collapse="+"),"+(1|PID)")) 
+    fm <- lmer(ff,data = data_r)
+    
+    predict_fm <- predict(fm)
+    sum_fm <- summary(fm)
+    
+    #Below we calculate the R -suared value
+    #First total sum of squares
+    tss <- sum((unlist(data_r[,c(response)])-mean(unlist(data_r[,c(response)])))^2)
+    #Second residual sum of squares
+    rss <- sum((unlist(data_r[,c(response)])-predict_fm)^2)
+    #R-squared
+    r_squared <- 1-(rss/tss)
+    #Percent variance explained
+    pve <- r_squared*100
+    
+    micom_flux_lm_met_data_naive$percent_variance_exp[k] <- pve
+    class(pve) <- "numeric"
+    
+    #We pull out the coefficinets
+    coef_fm <- as.data.frame(sum_fm$coefficients)
+    
+    micom_flux_lm_met_data_naive$pval[k] <- coef_fm[2,5]
+    micom_flux_lm_met_data_naive$coef[k] <- coef_fm[2,1] 
+  }
+  
+  
+  
+}
+
+for (m in met_vars) {
+  
+  micom_flux_lm_met_data_naive$padj[which(micom_flux_lm_met_data_naive$Outcome==m)] <- p.adjust(micom_flux_lm_met_data_naive$pval[which(micom_flux_lm_met_data_naive$Outcome==m)], method="fdr")
+  
+  assign(paste(m,"_sig_genes"), unique(micom_flux_lm_met_data_naive$Predictor[which(micom_flux_lm_met_data_naive$padj<0.05 & micom_flux_lm_met_data_naive$Outcome==m)]))
+}
+```
+
+#GLC Producers and COmnumers
+```{r}
+
+### Plotting Top Glucose (glc_D[e]) Producers and Consumers
+
+# 1. Filter for Glucose and calculate mean flux per taxon
+glc_flux <- micom_tot_tax %>%
+  filter(metabolite == "glc_D[e]") %>%
+  group_by(taxon) %>%
+  summarise(mean_flux = mean(total_flux, na.rm = TRUE)) %>%
+  filter(taxon != "medium") %>%
+  arrange(desc(mean_flux))
+
+# 2. Identify the Top 10 Producers (Highest Positive) and Consumers (Lowest Negative)
+top_producers <- head(glc_flux, 10)
+top_consumers <- tail(glc_flux, 10)
+
+plot_data_glc <- rbind(top_producers, top_consumers) %>%
+  mutate(Direction = ifelse(mean_flux > 0, "Producer (Export)", "Consumer (Import)")) %>%
+  # Reorder taxon for plotting so the bars are ranked
+  mutate(taxon = reorder(taxon, mean_flux))
+
+# 3. Generate the plot
+glc_plot <- ggplot(plot_data_glc, aes(x = taxon, y = mean_flux, fill = Direction)) +
+  geom_bar(stat = "identity") +
+  coord_flip() + # Flip for readability of taxon names
+  scale_fill_manual(values = c("Producer (Export)" = "#2ca02c", "Consumer (Import)" = "#d62728")) +
+  theme_minimal() +
+  labs(
+    title = "Top Taxa Flux: Glucose (glc_D[e])",
+    subtitle = "Top 10 Producers and Top 10 Consumers across cohort",
+    x = "Taxon",
+    y = "Mean Flux (mmol / [gDW * h])",
+    fill = "Metabolic Role"
+  ) +
+  theme(
+    axis.text.y = element_text(face = "italic"),
+    panel.grid.minor = element_blank()
+  )
+
+# Display the plot
+print(glc_plot)
+```
+

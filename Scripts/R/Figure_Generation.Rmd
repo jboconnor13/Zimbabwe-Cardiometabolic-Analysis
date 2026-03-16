@@ -58,13 +58,27 @@ FIGS4E <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS4E.RDS
 FIGS4F <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS4F.RDS")
 FIGS4G <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIGS4G.RDS")
 
+
+#Figure 3
+FIG3A <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG3A.RDS")
+FIG3B <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG3B.RDS")
+FIG3C <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG3C.RDS")
+FIG3D <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG3D.RDS")
+FIG3E <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG3E.RDS")
+FIG3F <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG3F.RDS")
+FIG3G <- readRDS("~/Zimbabwe-Cardiometabolic-Analysis/Figures/Panels/FIG3G.RDS")
+
+
+
 ```
 
-###Figure 1
+Fig1###Figure 1
 ```{r}
 #Cardiometabolic Confounders (Fig 1A), Cross Sectional Differences (Fig 1B), and Longitudinal Changes (Fig 1C)
 
 Fig1 <- ggarrange(FIG1A,FIG1B,FIG1C, nrow=1)
+
+
 
 saveRDS(Fig1, file = "../../Figures/Finals/Fig1.RDS")
 
@@ -92,6 +106,7 @@ FigS2BCD <- ggarrange(FigS2BC, FIGS2D, nrow=2, heights=c(1.6,1))
 
 FigS2 <- ggarrange(FIGS2A, FigS2BCD,widths=c(1,2.5))
 
+saveRDS(FigS2, file = "../../Figures/Finals/FigS2.RDS")
 
 ```
 
@@ -105,6 +120,7 @@ Fig2FG <- ggarrange(FIG2F, FIG2G, nrow=2)
 
 Fig2 <- ggarrange(Fig2AB,Fig2CDE,Fig2FG, widths=c(1.5,1.5,1), nrow=1, ncol=3)
 
+saveRDS(Fig2, file = "../../Figures/Finals/Fig2.RDS")
 
 ```
 
@@ -115,6 +131,8 @@ Fig2 <- ggarrange(Fig2AB,Fig2CDE,Fig2FG, widths=c(1.5,1.5,1), nrow=1, ncol=3)
 FigS3CD <- ggarrange(FIGS3C,FIGS3D, nrow=2)
 
 FigS3 <- ggarrange(FIGS3A, FIGS3B, FigS3CD, nrow=1, widths=c(1,1.5,1))
+
+saveRDS(FigS3, file = "../../Figures/Finals/FigS3.RDS")
 
 ```
 
@@ -134,6 +152,19 @@ FigS4BCDEFG <- ggarrange(FigS4BCDE, FigS45FG, nrow=1, widths=c(2,1))
 
 FigS4 <- ggarrange(FIGS4A,FigS4BCDEFG, nrow=1, widths = c(1.7,6))
 
+
+```
+
+Figure 3
+```{r}
+
+Fig3ABC <- ggarrange(FIG3A,FIG3B,FIG3C, nrow = 1)
+
+Fig3DE <- ggarrange(FIG3D,FIG3E, nrow=2)
+
+Fig3DEFG <- ggarrange(Fig3DE, FIG3F,FIG3G, nrow=1, widths=c(1,1,2))
+
+Fig3 <- ggarrange(Fig3ABC, Fig3DEFG, nrow=2)
 
 ```
 
