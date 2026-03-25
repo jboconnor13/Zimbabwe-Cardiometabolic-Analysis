@@ -305,6 +305,8 @@ for (response in met_vars) {
   #We remove missing variables
   data_r <- na.omit(met_lmer_data[,c(response,div_faith_vars_full,"PID")])
   
+  data_r[[response]] <- log10(data_r[[response]])
+  
   # create full model 
   ff <- as.formula(paste0(response,"~",paste0(div_faith_vars_full, collapse="+"),"+(1|PID)")) 
   fm <- lmer(ff,
@@ -422,6 +424,8 @@ for (response in met_vars) {
   
   #We remove missing variables
   data_r <- na.omit(met_lmer_data[,c(response,div_shannon_vars_full,"PID")])
+  
+  data_r[[response]] <- log10(data_r[[response]])
   
   # create full model 
   ff <- as.formula(paste0(response,"~",paste0(div_shannon_vars_full, collapse="+"),"+(1|PID)")) 
@@ -905,6 +909,8 @@ for (response in met_vars) {
   
     #We remove missing variables
     data_r <- na.omit(base_with_16S_clr[,c(response,mic_16S_vars_full,"PID")])
+    
+    data_r[[response]] <- log10(data_r[[response]])
   
     # create full model 
     ff <- as.formula(paste0(response,"~",paste0(mic_16S_vars_full, collapse="+"),"+(1|PID)")) 
@@ -985,11 +991,12 @@ mic_16S_plot <- ggplot(mic_16S_lm_data, aes(x = Predictor, y = DisplayOutcome, c
         title = element_text(size=15),
         plot.tag = element_text(size=25))
 
-sig_taxa_ind <- mic_16S_lm_data$Predictor[which(mic_16S_lm_data$padj<0.05)]
+sig_taxa_ind <- mic_16S_lm_data$Predictor[which(mic_16S_lm_data$padj<1.0)]
 
 mic_16S_lm_data_sig_data <- mic_16S_lm_data[which(mic_16S_lm_data$Predictor %in% sig_taxa_ind),]
 
 mic_16S_lm_data_sig_data$DisplayGenus <- ""
+
 for (r in 1:nrow(mic_16S_lm_data_sig_data)) {
   gen_ind_r <- as.numeric(substr(mic_16S_lm_data_sig_data$Predictor[r],7,nchar(as.character(mic_16S_lm_data_sig_data$Predictor[r]))))-1
   genus_name_r <-fecal.gen.names[gen_ind_r]
@@ -1050,6 +1057,8 @@ for (response in met_vars) {
     
     #We remove missing variables
     data_r <- na.omit(base_with_16S_clr_naive[,c(response,mic_16S_naive_vars_full,"PID")])
+    
+    data_r[[response]] <- log10(data_r[[response]])
     
     # create full model 
     ff <- as.formula(paste0(response,"~",paste0(mic_16S_naive_vars_full, collapse="+"),"+(1|PID)")) 
@@ -1113,7 +1122,7 @@ mic_16S_naive_lm_data$DisplayOutcome <- paste0(mic_16S_naive_lm_data$DisplayOutc
 mic_16S_naive_lm_data
 
 mic_16S_naive_plot <- ggplot(mic_16S_naive_lm_data, aes(x = Predictor, y = DisplayOutcome, color=sig)) +
-  scale_color_manual(values=c("lightblue","pink","red"))+
+  scale_color_manual(values=c("blue","lightblue","pink","red"))+
   geom_point(size=5) +
   theme_minimal() +
   labs(x = "Plasma Measure", y = " ", fill=" ", tag="C", title="All Participants") +
@@ -1132,6 +1141,38 @@ mic_16S_naive_plot <- ggplot(mic_16S_naive_lm_data, aes(x = Predictor, y = Displ
         plot.tag = element_text(size=25))
 
 sig_taxa_ind <- mic_16S_naive_lm_data$Predictor[which(mic_16S_naive_lm_data$padj<0.05)]
+
+mic_16S_naive_lm_data_sig <- mic_16S_naive_lm_data[which(mic_16S_naive_lm_data$Predictor %in% sig_taxa_ind),]
+
+mic_16S_naive_lm_data_sig$DisplayPredictor <- ""
+for (i in 1:nrow(mic_16S_naive_lm_data_sig)) {
+  gen_ind_i <- as.character(mic_16S_naive_lm_data_sig$Predictor[i])
+  ind_i <- as.numeric(substr(gen_ind_i,11,nchar(gen_ind_i)))
+  gen_i <- fecal.gen.names[ind_i]
+  mic_16S_naive_lm_data_sig$DisplayPredictor[i] <- gen_i
+  
+}
+
+mic_16S_naive_plot_sig <- ggplot(mic_16S_naive_lm_data_sig, aes(x = DisplayPredictor, y = DisplayOutcome, color=sig)) +
+  scale_color_manual(values=c("lightblue","blue","pink","red"))+
+  geom_point(size=5) +
+  theme_minimal() +
+  labs(x = "Plasma Measure", y = " ", fill=" ", tag="A", title="Naive Participants") +
+  theme_classic() +
+  guides(color = guide_legend(ncol = 1))+
+  theme(legend.position = "right",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12),
+        axis.text.y = element_text(size=12),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12, angle=45, hjust=1),
+        strip.text.x = element_text(size=15),
+        strip.text.y = element_text(size=15),
+        title = element_text(size=15),
+        plot.tag = element_text(size=25))
+
+
 
 ```
 
@@ -1387,6 +1428,8 @@ for (response in met_vars) {
   #We remove missing variables
   data_r <- na.omit(fecal.WU.pc.data[,c(response,mic_pc_vars_full,"PID")])
   
+  data_r[[response]] <- log10(data_r[[response]])
+  
   # create full model 
   ff <- as.formula(paste0(response,"~",paste0(mic_pc_vars_full, collapse="+"),"+(1|PID)")) 
   fm <- lmer(ff,
@@ -1509,6 +1552,8 @@ for (response in met_vars) {
   #We remove missing variables
   data_r <- na.omit(fecal.WU.pc.data_naive[,c(response,mic_pc_vars_full,"PID")])
   
+  data_r[[response]] <- log10(data_r[[response]])
+  
   # create full model 
   ff <- as.formula(paste0(response,"~",paste0(mic_pc_vars_full, collapse="+"),"+(1|PID)")) 
   fm <- lmer(ff,
@@ -1605,15 +1650,15 @@ mic_pc_plot_naive <- ggplot(mic_pc_lm_naive_data, aes(x = Predictor, y = Display
 ```{r}
 
 
-Trig_PC3_Plot <- ggplot(data = fecal.WU.pc.data_naive, size=2, alpha=.5, aes(x = as.numeric(fecal.WU.pc.data_naive$PC3), y = as.numeric(fecal.WU.pc.data_naive$Trig))) + 
-  geom_point(data=fecal.WU.pc.data_naive,aes(fill=Cohort_Week, color = Cohort_Week),shape=21, size=3, stroke=1, alpha=0.5)+
+HDL_PC3_Plot <- ggplot(data = fecal.WU.pc.data, size=2, alpha=.5, aes(x = as.numeric(fecal.WU.pc.data$PC3), y = as.numeric(fecal.WU.pc.data$HDL))) + 
+  geom_point(data=fecal.WU.pc.data,aes(fill=Cohort_Week, color = Cohort_Week),shape=21, size=3, stroke=1, alpha=0.5)+
   geom_smooth(method="lm", se=TRUE)+
   scale_color_identity()+
-  geom_line(size=.5, alpha=.3, aes(group=fecal.WU.pc.data_naive$PID))+
+  geom_line(size=.5, alpha=.3, aes(group=fecal.WU.pc.data$PID))+
 #             scale_color_manual(values=c("#A6611A","gray","#018571"), name="Cohort")+
                 scale_fill_manual(values=c("#A6611A","#A6611A","gray","gray","#018571","#018571"), name="Cohort")+
                 scale_color_manual(values=c("#A6611A","black","gray","black","#018571","black"), name="Cohort")+  
-  labs(x="PC3", y="Triglcyerides (mg/dL)", key=" ", tag="G")+
+  labs(x="PC3", y="HDL-C (mg/dL)", key=" ", tag="G")+
   guides(color=guide_legend(nrow=1,bycol=TRUE))+
   theme_bw()+
   theme(title=element_text(size=15),
@@ -1633,12 +1678,12 @@ Trig_PC3_Plot <- ggplot(data = fecal.WU.pc.data_naive, size=2, alpha=.5, aes(x =
 ####Plot Saving
 ```{r}
 
-saveRDS(mic_16S_plot_sig, file = "../../Figures/Panels/FIGS4A.RDS")
+saveRDS(mic_16S_naive_plot_sig, file = "../../Figures/Panels/FIGS4A.RDS")
 saveRDS(fecal.mic_pcoaplot_biplot_12_samples, file = "../../Figures/Panels/FIGS4B.RDS")
 saveRDS(fecal.mic_pcoaplot_biplot_12_arrows, file = "../../Figures/Panels/FIGS4C.RDS")
 saveRDS(fecal.mic_pcoaplot_biplot_34_samples, file = "../../Figures/Panels/FIGS4D.RDS")
 saveRDS(fecal.mic_pcoaplot_biplot_34_arrows, file = "../../Figures/Panels/FIGS4E.RDS")
-saveRDS(mic_pc_plot_naive, file = "../../Figures/Panels/FIGS4F.RDS")
-saveRDS(Trig_PC3_Plot, file = "../../Figures/Panels/FIGS4G.RDS")
+saveRDS(mic_pc_plot, file = "../../Figures/Panels/FIGS4F.RDS")
+saveRDS(HDL_PC3_Plot, file = "../../Figures/Panels/FIGS4G.RDS")
 ```
 
